@@ -27,7 +27,6 @@ extern "C"
 
 /* Includes ------------------------------------------------------------------*/
 #include "lps22hh_reg.h"
-#include "custom_bus.h"
 #include <string.h>
 
 /** @addtogroup BSP BSP
@@ -178,8 +177,6 @@ typedef union
   * @{
   */
 
-int32_t ReadRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length);
-int32_t WriteRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length);
 int32_t LPS22HH_RegisterBusIO(LPS22HH_Object_t *pObj, LPS22HH_IO_t *pIO);
 int32_t LPS22HH_Init(LPS22HH_Object_t *pObj);
 int32_t LPS22HH_DeInit(LPS22HH_Object_t *pObj);
