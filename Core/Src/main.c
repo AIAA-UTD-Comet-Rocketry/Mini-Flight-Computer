@@ -26,6 +26,8 @@
 #include "lps22hh.h"
 #include "lsm6dsr.h"
 #include "m95p32.h"
+
+#include "usbd_cdc_if.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -116,6 +118,15 @@ int main(void)
   MX_GPIO_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  //USB Test Code Begin
+  while (1)
+  {
+	  uint8_t buffer[] = "Hello, World!\r\n";
+	  CDC_Transmit_FS(buffer, sizeof(buffer));
+	  HAL_Delay(1000);
+  }
+  //USB Test Code End
+
   BSP_SPI1_Init();
   Lps22_Init();
   Lsm6D_Init();
