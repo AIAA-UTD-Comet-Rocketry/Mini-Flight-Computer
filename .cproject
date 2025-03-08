@@ -53,6 +53,7 @@
 									<listOptionValue builtIn="false" value="../Drivers/BSP/Components/M95P32"/>
 									<listOptionValue builtIn="false" value="../Drivers/BSP/Components/lsm6dsr"/>
 									<listOptionValue builtIn="false" value="../Drivers/BSP/Components/lps22hh"/>
+									<listOptionValue builtIn="false" value="../Core/Libraries/RocketFSM/Inc"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.1464396160" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -186,5 +187,13 @@
 		<scannerConfigBuildInfo instanceId="com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.release.1886200729;com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.release.1886200729.;com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.177263558;com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.492760673">
 			<autodiscovery enabled="false" problemReportingEnabled="true" selectedProfileId=""/>
 		</scannerConfigBuildInfo>
+	</storageModule>
+	<storageModule moduleId="refreshScope" versionNumber="2">
+		<configuration configurationName="Debug">
+			<resource resourceType="PROJECT" workspacePath="/FlightCode"/>
+		</configuration>
+		<configuration configurationName="Release">
+			<resource resourceType="PROJECT" workspacePath="/FlightCode"/>
+		</configuration>
 	</storageModule>
 </cproject>
