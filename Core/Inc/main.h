@@ -61,6 +61,8 @@ void Error_Handler(void);
 #define DROGUE1_GPIO_Port GPIOC
 #define DROGUE2_Pin GPIO_PIN_14
 #define DROGUE2_GPIO_Port GPIOC
+#define STATUS_LED_Pin GPIO_PIN_15
+#define STATUS_LED_GPIO_Port GPIOC
 #define MAIN1_Pin GPIO_PIN_1
 #define MAIN1_GPIO_Port GPIOA
 #define MAIN2_Pin GPIO_PIN_2

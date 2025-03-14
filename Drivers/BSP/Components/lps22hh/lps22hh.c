@@ -69,8 +69,6 @@ LPS22HH_TEMP_Drv_t LPS22HH_TEMP_Driver =
   * @{
   */
 
-static int32_t ReadRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length);
-static int32_t WriteRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length);
 static int32_t LPS22HH_GetOutputDataRate(LPS22HH_Object_t *pObj, float *Odr);
 static int32_t LPS22HH_SetOutputDataRate_When_Enabled(LPS22HH_Object_t *pObj, float Odr);
 static int32_t LPS22HH_SetOutputDataRate_When_Disabled(LPS22HH_Object_t *pObj, float Odr);
@@ -1053,11 +1051,26 @@ int32_t LPS22HH_Set_Filter_Mode(LPS22HH_Object_t *pObj, uint8_t filterMode)
   * @param  Length the length
   * @retval 0 in case of success, an error code otherwise
   */
-static int32_t ReadRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length)
+int32_t ReadRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length)
 {
-  LPS22HH_Object_t *pObj = (LPS22HH_Object_t *)Handle;
+	int32_t ret;
 
-  return pObj->IO.ReadReg(pObj->IO.Address, Reg, pData, Length);
+	//activate chosen peripheral
+	HAL_GPIO_WritePin(GPIOC, *(uint16_t*)Handle, GPIO_PIN_RESET);
+
+	uint8_t pTxBuf[Length + 1];
+	uint8_t pRxBuf[Length + 1];
+	pTxBuf[0] = Reg;
+	pTxBuf[0] |= 0x80; //read mask for spi address
+	memset(pTxBuf+1,0,Length);
+
+	ret = BSP_SPI1_SendRecv(pTxBuf, pRxBuf, Length+1);
+	memcpy(pData,pRxBuf+1,Length);
+
+	//deactivate chosen peripheral
+	HAL_GPIO_WritePin(GPIOC, *(uint16_t*)Handle, GPIO_PIN_SET);
+
+	return ret;
 }
 
 /**
@@ -1068,11 +1081,23 @@ static int32_t ReadRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t L
   * @param  Length the length
   * @retval 0 in case of success, an error code otherwise
   */
-static int32_t WriteRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length)
+int32_t WriteRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length)
 {
-  LPS22HH_Object_t *pObj = (LPS22HH_Object_t *)Handle;
+	int32_t ret;
 
-  return pObj->IO.WriteReg(pObj->IO.Address, Reg, pData, Length);
+	//activate chosen peripheral
+	HAL_GPIO_WritePin(GPIOC, *(uint16_t*)Handle, GPIO_PIN_RESET);
+
+	uint8_t pTxBuf[Length + 1];
+	pTxBuf[0] = Reg;
+	memcpy(pTxBuf+1,pData,Length);
+
+	ret = BSP_SPI1_Send(pTxBuf, Length+1);
+
+	//deactivate chosen peripheral
+	HAL_GPIO_WritePin(GPIOC, *(uint16_t*)Handle, GPIO_PIN_SET);
+
+	return ret;
 }
 
 /**
