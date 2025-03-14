@@ -119,12 +119,12 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   //USB Test Code Begin
-  while (1)
-  {
-	  uint8_t buffer[] = "Hello, World!\r\n";
-	  CDC_Transmit_FS(buffer, sizeof(buffer));
-	  HAL_Delay(1000);
-  }
+//  while (1)
+//  {
+//	  uint8_t buffer[] = "Hello, World!\r\n";
+//	  CDC_Transmit_FS(buffer, sizeof(buffer));
+//	  HAL_Delay(1000);
+//  }
   //USB Test Code End
 
   BSP_SPI1_Init();
@@ -159,7 +159,7 @@ int main(void)
 
 #endif
 
-#if 0
+#if 1
   uint8_t tx_dump[6];
   uint8_t rx_dump[6];
   memset(tx_dump, 0, 6);
@@ -175,6 +175,22 @@ int main(void)
 #if 0
   M95p32_Reformat(); //clear memory
   while(1){}
+#endif
+
+#if 0
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_15, GPIO_PIN_SET);   // Turn LED on
+     HAL_Delay(1000);
+     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_15, GPIO_PIN_RESET); // Turn LED off
+     HAL_Delay(1000);
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+  }
+  /* USER CODE END 3 */
 #endif
 
   while (1)
@@ -288,13 +304,14 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, DROGUE1_Pin|DROGUE2_Pin|IMU_CS_Pin|PRESS_CS_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, DROGUE1_Pin|DROGUE2_Pin|STATUS_LED_Pin|IMU_CS_Pin
+                          |PRESS_CS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, MAIN1_Pin|MAIN2_Pin|EEPROM_CS_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : DROGUE1_Pin DROGUE2_Pin */
-  GPIO_InitStruct.Pin = DROGUE1_Pin|DROGUE2_Pin;
+  /*Configure GPIO pins : DROGUE1_Pin DROGUE2_Pin STATUS_LED_Pin */
+  GPIO_InitStruct.Pin = DROGUE1_Pin|DROGUE2_Pin|STATUS_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -459,6 +476,13 @@ static void M95p32_Close(void)
 	Page_Write(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U);
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 }
+
+//Modify the existing _write() from syscalls.c
+int __io_putchar(int ch)
+{
+
+}
+
 /* USER CODE END 4 */
 
 /**
