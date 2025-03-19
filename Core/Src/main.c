@@ -127,27 +127,24 @@ int main(void)
   uint32_t nextTick = 0;
   uint8_t memFlag = 0;
 
-#if 0 //pressure test
-  uint8_t hw_ID = 0;
+#if 0 // sensor tests
+  uint8_t phw_ID = 0;
+  uint8_t xhw_ID = 0;
   while (1) {
+	  // pressure test
 	  HAL_Delay(100);
-	  hw_ID = 0;
-	  LPS22HH_ReadID(&hlps22, &hw_ID);
+	  phw_ID = 0;
+	  LPS22HH_ReadID(&hlps22, &phw_ID);
+
+  	  // xcel test
+	  HAL_Delay(100);
+	  xhw_ID = 0;
+	  LSM6DSR_ReadID(&hlsm6d, &xhw_ID);
   }
 
 #endif
 
-#if 0 //xcel test
-  uint8_t hw_ID = 0;
-  while (1) {
-	  HAL_Delay(100);
-	  hw_ID = 0;
-	  LSM6DSR_ReadID(&hlsm6d, &hw_ID);
-  }
-
-#endif
-
-#if 0
+#if 0 // pressure sensor reading test (checks for MEMS damage)
   uint8_t tx_dump[6];
   uint8_t rx_dump[6];
   memset(tx_dump, 0, 6);
