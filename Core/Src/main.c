@@ -381,7 +381,6 @@ static void M95p32_Init(void)
 	WRITE_ENABLE(&hm95p32);
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
-	//todo add file init code
 	memset(mem_InitBlock, 0, 512U);
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
 	Single_Read(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U); //get page with init data
@@ -444,6 +443,9 @@ static void M95p32_Close(void)
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
 	Page_Write(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U);
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+	while(1)
+	{
+	}
 }
 /* USER CODE END 4 */
 
