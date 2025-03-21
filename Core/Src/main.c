@@ -161,6 +161,7 @@ int main(void)
   while(1){}
 #endif
 
+  HAL_Delay(10000); //10 sec for save interrupt
   while (1)
   {
 	  dataFlag = 0;
@@ -176,9 +177,9 @@ int main(void)
 		  LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
 	  }
 
-	  if(uwTick > nextTick)
+	  if(uwTick >= nextTick)
 	  {
-		  nextTick = uwTick + 2; //0.2s delay
+		  nextTick = uwTick + 50; //0.05s delay
 		  HAL_GPIO_TogglePin(DROGUE1_GPIO_Port, DROGUE1_Pin);
 
 		  //perform a memory store
@@ -198,9 +199,16 @@ int main(void)
 		  memFlag = 0;
 		  //block is ready to be stored
 
-		  //this takes 0.5ms at minimum, can caused missed sensor cycle each 2.8sec
+		  //this takes 0.5ms at minimum, can caused missed sensor cycle each 700msec
 		  Page_Write(&hm95p32, (uint8_t*)stagedMem, currTarAddr, sizeof(stagedMem));
 		  currTarAddr += 0x200; //move address to next page
+		  if(currTarAddr >= 0x400000){
+			  // max data size reached
+			  __disable_irq();
+			  while(1)
+			  {
+			  }
+		  }
 	  }
     /* USER CODE END WHILE */
 
@@ -302,9 +310,13 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : USERSENSE_Pin */
   GPIO_InitStruct.Pin = USERSENSE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(USERSENSE_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
   HAL_GPIO_WritePin(GPIOC, IMU_CS_Pin|PRESS_CS_Pin, GPIO_PIN_SET);
@@ -449,9 +461,23 @@ static void M95p32_Close(void)
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
 	Page_Write(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U);
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-	while(1)
-	{
-	}
+}
+
+/**
+  * @brief  EXTI line detection callbacks.
+  * @param  GPIO_Pin Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if(GPIO_Pin == USERSENSE_Pin)
+  {
+    __disable_irq();
+    while(1)
+    {
+    }
+  }
+
 }
 /* USER CODE END 4 */
 
