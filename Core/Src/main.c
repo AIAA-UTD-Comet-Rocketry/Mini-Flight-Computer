@@ -51,7 +51,7 @@ extern SPI_HandleTypeDef hspi1;
 LPS22HH_Object_t hlps22;
 LSM6DSR_Object_t hlsm6d;
 M95_Object_t     hm95p32;
-uint32_t         currTarAddr;
+volatile uint32_t         currTarAddr;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -80,6 +80,8 @@ dataframe_t nextFrame __attribute__((aligned (4))); //aligned for faster data tr
 dataframe_t stagedMem[14] __attribute__((aligned (4)));
 uint32_t mem_InitBlock[128] __attribute__((aligned (4))); //512 bytes
 uint8_t memIndex = 0;
+volatile uint8_t debugSector = 0;
+uint8_t sector[4096] __attribute__((aligned (4))) = {0};
 /* USER CODE END 0 */
 
 /**
@@ -126,6 +128,23 @@ int main(void)
   uint32_t nextTick = 0;
   uint8_t memFlag = 0;
 
+#if 0 // mem dump
+  currTarAddr = 0x000000;
+  uint8_t phw_ID = 0;
+  uint8_t xhw_ID = 0;
+  while (1) {
+	  debugSector = 0;
+
+	  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+	  Single_Read(&hm95p32, sector, currTarAddr, 4096U); //get page with init data
+	  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
+	  while(!debugSector){};
+	  currTarAddr += 4096U;
+  }
+
+#endif
+
 #if 0 // sensor tests
   uint8_t phw_ID = 0;
   uint8_t xhw_ID = 0;
@@ -161,7 +180,7 @@ int main(void)
   while(1){}
 #endif
 
-  HAL_Delay(10000); //10 sec for save interrupt
+  HAL_Delay(1000); //10 sec for save interrupt
   while (1)
   {
 	  dataFlag = 0;
@@ -198,9 +217,14 @@ int main(void)
 	  {
 		  memFlag = 0;
 		  //block is ready to be stored
+		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+		  WRITE_ENABLE(&hm95p32);
+		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
 		  //this takes 0.5ms at minimum, can caused missed sensor cycle each 700msec
+		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
 		  Page_Write(&hm95p32, (uint8_t*)stagedMem, currTarAddr, sizeof(stagedMem));
+		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 		  currTarAddr += 0x200; //move address to next page
 		  if(currTarAddr >= 0x400000){
 			  // max data size reached
@@ -472,10 +496,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if(GPIO_Pin == USERSENSE_Pin)
   {
-    __disable_irq();
-    while(1)
-    {
-    }
+	__disable_irq();
+	while(1)
+	{
+	}
+    //debugSector = 1;
   }
 
 }
