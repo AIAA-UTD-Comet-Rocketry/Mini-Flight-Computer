@@ -54,7 +54,7 @@ extern SPI_HandleTypeDef hspi1;
 LPS22HH_Object_t hlps22;
 LSM6DSR_Object_t hlsm6d;
 M95_Object_t     hm95p32;
-uint32_t         currTarAddr;
+volatile uint32_t         currTarAddr;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -83,6 +83,8 @@ dataframe_t nextFrame __attribute__((aligned (4))); //aligned for faster data tr
 dataframe_t stagedMem[14] __attribute__((aligned (4)));
 uint32_t mem_InitBlock[128] __attribute__((aligned (4))); //512 bytes
 uint8_t memIndex = 0;
+volatile uint8_t debugSector = 0;
+uint8_t sector[4096] __attribute__((aligned (4))) = {0};
 /* USER CODE END 0 */
 
 /**
@@ -139,27 +141,41 @@ int main(void)
   uint32_t nextTick = 0;
   uint8_t memFlag = 0;
 
-#if 0 //pressure test
-  uint8_t hw_ID = 0;
+#if 0 // mem dump
+  currTarAddr = 0x000000;
+  uint8_t phw_ID = 0;
+  uint8_t xhw_ID = 0;
   while (1) {
-	  HAL_Delay(100);
-	  hw_ID = 0;
-	  LPS22HH_ReadID(&hlps22, &hw_ID);
+	  debugSector = 0;
+
+	  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+	  Single_Read(&hm95p32, sector, currTarAddr, 4096U); //get page with init data
+	  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
+	  while(!debugSector){};
+	  currTarAddr += 4096U;
   }
 
 #endif
 
-#if 0 //xcel test
-  uint8_t hw_ID = 0;
+#if 0 // sensor tests
+  uint8_t phw_ID = 0;
+  uint8_t xhw_ID = 0;
   while (1) {
+	  // pressure test
 	  HAL_Delay(100);
-	  hw_ID = 0;
-	  LSM6DSR_ReadID(&hlsm6d, &hw_ID);
+	  phw_ID = 0;
+	  LPS22HH_ReadID(&hlps22, &phw_ID);
+
+  	  // xcel test
+	  HAL_Delay(100);
+	  xhw_ID = 0;
+	  LSM6DSR_ReadID(&hlsm6d, &xhw_ID);
   }
 
 #endif
 
-#if 1
+#if 0 // pressure sensor reading test (checks for MEMS damage)
   uint8_t tx_dump[6];
   uint8_t rx_dump[6];
   memset(tx_dump, 0, 6);
@@ -193,6 +209,8 @@ int main(void)
   /* USER CODE END 3 */
 #endif
 
+  HAL_Delay(1000); //10 sec for save interrupt
+
   while (1)
   {
 	  dataFlag = 0;
@@ -208,9 +226,9 @@ int main(void)
 		  LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
 	  }
 
-	  if(uwTick > nextTick)
+	  if(uwTick >= nextTick)
 	  {
-		  nextTick = uwTick + 2; //0.2s delay
+		  nextTick = uwTick + 50; //0.05s delay
 		  HAL_GPIO_TogglePin(DROGUE1_GPIO_Port, DROGUE1_Pin);
 
 		  //perform a memory store
@@ -229,10 +247,22 @@ int main(void)
 	  {
 		  memFlag = 0;
 		  //block is ready to be stored
+		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+		  WRITE_ENABLE(&hm95p32);
+		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
-		  //this takes 0.5ms at minimum, can caused missed sensor cycle each 2.8sec
+		  //this takes 0.5ms at minimum, can caused missed sensor cycle each 700msec
+		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
 		  Page_Write(&hm95p32, (uint8_t*)stagedMem, currTarAddr, sizeof(stagedMem));
+		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 		  currTarAddr += 0x200; //move address to next page
+		  if(currTarAddr >= 0x400000){
+			  // max data size reached
+			  __disable_irq();
+			  while(1)
+			  {
+			  }
+		  }
 	  }
     /* USER CODE END WHILE */
 
@@ -331,6 +361,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : USERSENSE_Pin */
+  GPIO_InitStruct.Pin = USERSENSE_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(USERSENSE_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
 /* USER CODE BEGIN MX_GPIO_Init_2 */
   HAL_GPIO_WritePin(GPIOC, IMU_CS_Pin|PRESS_CS_Pin, GPIO_PIN_SET);
 
@@ -412,7 +452,6 @@ static void M95p32_Init(void)
 	WRITE_ENABLE(&hm95p32);
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
-	//todo add file init code
 	memset(mem_InitBlock, 0, 512U);
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
 	Single_Read(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U); //get page with init data
@@ -477,13 +516,29 @@ static void M95p32_Close(void)
 	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 }
 
+/**
+  * @brief  EXTI line detection callbacks.
+  * @param  GPIO_Pin Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if(GPIO_Pin == USERSENSE_Pin)
+  {
+	__disable_irq();
+	while(1)
+	{
+	}
+    //debugSector = 1;
+  }
+}
+/* USER CODE END 4 */
+
 //Modify the existing _write() from syscalls.c
 int __io_putchar(int ch)
 {
 
 }
-
-/* USER CODE END 4 */
 
 /**
   * @brief  This function is executed in case of error occurrence.

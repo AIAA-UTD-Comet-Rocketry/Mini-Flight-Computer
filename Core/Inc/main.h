@@ -73,6 +73,9 @@ void Error_Handler(void);
 #define IMU_CS_GPIO_Port GPIOC
 #define PRESS_CS_Pin GPIO_PIN_5
 #define PRESS_CS_GPIO_Port GPIOC
+#define USERSENSE_Pin GPIO_PIN_5
+#define USERSENSE_GPIO_Port GPIOB
+#define USERSENSE_EXTI_IRQn EXTI9_5_IRQn
 
 /* USER CODE BEGIN Private defines */
 

@@ -1,0 +1,151 @@
+#include "FlightState.h"
+#include <stdio.h>
+
+/* Default Callback Implementations */
+__attribute__((weak)) void enterIdle(void) { printf("Default: Entering Idle state.\n"); }
+__attribute__((weak)) void enterArmed(void) { printf("Default: Entering Armed state.\n"); }
+__attribute__((weak)) void enterDisarm(void) { printf("Default: Entering Disarm state.\n"); }
+__attribute__((weak)) void enterBurning(void) { printf("Default: Entering Burning state.\n"); }
+__attribute__((weak)) void enterRising(void) { printf("Default: Entering Rising state.\n"); }
+__attribute__((weak)) void enterApogee(void) { printf("Default: Entering Apogee state.\n"); }
+__attribute__((weak)) void enterDrogueDescent(void) { printf("Default: Entering Drogue Descent state.\n"); }
+__attribute__((weak)) void enterMainDescent(void) { printf("Default: Entering Main Descent state.\n"); }
+__attribute__((weak)) void enterLanded(void) { printf("Default: Entering Landed state.\n"); }
+
+/* Default Transition Functions - Return true if the transition condition is met */
+__attribute__((weak)) bool idleTransition(void) { return true; }
+__attribute__((weak)) bool armedTransition(void) { return true; }
+__attribute__((weak)) bool disarmTransition(void) { return true; }
+__attribute__((weak)) bool burningTransition(void) { return true; }
+__attribute__((weak)) bool risingTransition(void) { return true; }
+__attribute__((weak)) bool apogeeTransition(void) { return true; }
+__attribute__((weak)) bool drogueDescentTransition(void) { return true; }
+__attribute__((weak)) bool mainDescentTransition(void) { return true; }
+__attribute__((weak)) bool landedTransition(void) { return true; }
+
+/* Initialization function for FlightState.
+   Users can override weak functions or modify the structure after initialization.
+*/
+void initFlightState(FlightState *fs) {
+    fs->currentState = STATE_IDLE;
+
+    fs->enterIdle            = enterIdle;
+    fs->enterArmed           = enterArmed;
+    fs->enterDisarm          = enterDisarm;
+    fs->enterBurning         = enterBurning;
+    fs->enterRising          = enterRising;
+    fs->enterApogee          = enterApogee;
+    fs->enterDrogueDescent   = enterDrogueDescent;
+    fs->enterMainDescent     = enterMainDescent;
+    fs->enterLanded          = enterLanded;
+
+    fs->idleTransition          = idleTransition;
+    fs->armedTransition         = armedTransition;
+    fs->disarmTransition        = disarmTransition;
+    fs->burningTransition       = burningTransition;
+    fs->risingTransition        = risingTransition;
+    fs->apogeeTransition        = apogeeTransition;
+    fs->drogueDescentTransition = drogueDescentTransition;
+    fs->mainDescentTransition   = mainDescentTransition;
+    fs->landedTransition        = landedTransition;
+
+    // Note: The user can override these weak functions or modify fs after init.
+}
+
+// Helper function to get the state name as a string
+static const char* stateToString(State state) {
+    switch (state) {
+        case STATE_IDLE:            return "Idle";
+        case STATE_ARMED:           return "Armed";
+        case STATE_DISARM:          return "Disarm";
+        case STATE_BURNING:         return "Burning";
+        case STATE_RISING:          return "Rising";
+        case STATE_APOGEE:          return "Apogee";
+        case STATE_DROGUE_DESCENT:   return "Drogue Descent";
+        case STATE_MAIN_DESCENT:     return "Main Descent";
+        case STATE_LANDED:          return "Landed";
+        default:                    return "Unknown";
+    }
+}
+
+/* updateState() checks if the transition function returns true.
+   If so, it moves to the next state in sequence.
+*/
+void updateState(FlightState *fs) {
+    bool shouldTransition = false;
+    State newState = fs->currentState;
+
+    switch (fs->currentState) {
+        case STATE_IDLE:
+            shouldTransition = fs->idleTransition();
+            newState = STATE_ARMED;
+            break;
+        case STATE_ARMED:
+            shouldTransition = fs->armedTransition();
+            newState = STATE_BURNING;
+            break;
+        case STATE_DISARM:
+            shouldTransition = fs->disarmTransition();
+            newState = STATE_IDLE;
+            break;
+        case STATE_BURNING:
+            shouldTransition = fs->burningTransition();
+            newState = STATE_RISING;
+            break;
+        case STATE_RISING:
+            shouldTransition = fs->risingTransition();
+            newState = STATE_APOGEE;
+            break;
+        case STATE_APOGEE:
+            shouldTransition = fs->apogeeTransition();
+            newState = STATE_DROGUE_DESCENT;
+            break;
+        case STATE_DROGUE_DESCENT:
+            shouldTransition = fs->drogueDescentTransition();
+            newState = STATE_MAIN_DESCENT;
+            break;
+        case STATE_MAIN_DESCENT:
+            shouldTransition = fs->mainDescentTransition();
+            newState = STATE_LANDED;
+            break;
+        case STATE_LANDED:
+            shouldTransition = fs->landedTransition();
+            newState = STATE_DISARM;
+            break;
+    }
+
+    if (shouldTransition && newState != fs->currentState) {
+        printf("Transitioning from %s to %s\n", stateToString(fs->currentState), stateToString(newState));
+        fs->currentState = newState;
+
+        switch (newState) {
+            case STATE_IDLE:
+                fs->enterIdle();
+                break;
+            case STATE_ARMED:
+                fs->enterArmed();
+                break;
+            case STATE_DISARM:
+                fs->enterDisarm();
+                break;
+            case STATE_BURNING:
+                fs->enterBurning();
+                break;
+            case STATE_RISING:
+                fs->enterRising();
+                break;
+            case STATE_APOGEE:
+                fs->enterApogee();
+                break;
+            case STATE_DROGUE_DESCENT:
+                fs->enterDrogueDescent();
+                break;
+            case STATE_MAIN_DESCENT:
+                fs->enterMainDescent();
+                break;
+            case STATE_LANDED:
+                fs->enterLanded();
+                break;
+        }
+    }
+}

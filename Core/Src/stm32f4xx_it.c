@@ -187,7 +187,10 @@ void SysTick_Handler(void)
   /* USER CODE END SysTick_IRQn 0 */
   HAL_IncTick();
   /* USER CODE BEGIN SysTick_IRQn 1 */
-
+  if(!(HAL_GetTick() % 1000))
+  {
+    HAL_GPIO_TogglePin(STATUS_LED_GPIO_Port, STATUS_LED_Pin);
+  }
   /* USER CODE END SysTick_IRQn 1 */
 }
 
@@ -201,6 +204,7 @@ void SysTick_Handler(void)
 /**
   * @brief This function handles USB On The Go FS global interrupt.
   */
+
 void OTG_FS_IRQHandler(void)
 {
   /* USER CODE BEGIN OTG_FS_IRQn 0 */
