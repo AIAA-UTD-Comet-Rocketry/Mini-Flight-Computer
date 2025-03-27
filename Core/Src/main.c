@@ -157,7 +157,6 @@ int main(void)
 	  if(uwTick >= nextTick)
 	  {
 		  nextTick = uwTick + 50; //0.05s delay
-		  HAL_GPIO_TogglePin(DROGUE1_GPIO_Port, DROGUE1_Pin);
 
 		  //perform a memory store
 		  nextFrame.currTick = uwTick;
