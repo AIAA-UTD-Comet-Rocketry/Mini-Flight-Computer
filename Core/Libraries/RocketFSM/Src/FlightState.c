@@ -1,3 +1,25 @@
+/*
+ * General flight logic that would apply to every flight computer firmware belongs
+ * in the FlightState.c file.
+ * All callbacks should be defined in implementation.
+ *
+ * STATE_IDLE <---------
+ *      |               ^
+ * STATE_ARMED --> STATE_DISARM
+ *      |
+ * STATE_BURNING
+ *      |
+ * STATE_RISING
+ *      |
+ * STATE_APOGEE
+ *      |
+ * STATE_DROGUE_DESCENT
+ *      |
+ * STATE_MAIN_DESCENT
+ *      |
+ * STATE_LANDED
+ */
+
 #include "flightState.h"
 #include <stdio.h>
 
@@ -23,9 +45,10 @@ __attribute__((weak)) bool drogueDescentTransition(void) { return true; }
 __attribute__((weak)) bool mainDescentTransition(void) { return true; }
 __attribute__((weak)) bool landedTransition(void) { return true; }
 
-/* Initialization function for FlightState.
-   Users can override weak functions or modify the structure after initialization.
-*/
+/*
+ * Initialization function for FlightState.
+ * Users can override weak functions or modify the structure after initialization.
+ */
 void initFlightState(FlightState *fs) {
     fs->currentState = STATE_IDLE;
 
@@ -68,9 +91,10 @@ static const char* stateToString(State state) {
     }
 }
 
-/* updateState() checks if the transition function returns true.
-   If so, it moves to the next state in sequence.
-*/
+/*
+ * updateState() checks if the transition function returns true.
+ * If so, it moves to the next state in sequence.
+ */
 void updateState(FlightState *fs) {
     bool shouldTransition = false;
     State newState = fs->currentState;

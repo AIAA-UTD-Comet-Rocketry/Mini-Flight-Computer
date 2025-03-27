@@ -51,7 +51,11 @@ extern SPI_HandleTypeDef hspi1;
 LPS22HH_Object_t hlps22;
 LSM6DSR_Object_t hlsm6d;
 M95_Object_t     hm95p32;
-volatile uint32_t         currTarAddr;
+volatile uint32_t currTarAddr;
+
+float gAltitude;
+float gTotalAcc;
+float gDegOffVert;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,8 +65,10 @@ static void MX_GPIO_Init(void);
 static void Lps22_Init(void);
 static void Lsm6D_Init(void);
 static void M95p32_Init(void);
-static void M95p32_Reformat(void);
 static void M95p32_Close(void);
+void M95p32_Reformat(void);
+
+extern void temocTests();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -128,59 +134,9 @@ int main(void)
   uint32_t nextTick = 0;
   uint8_t memFlag = 0;
 
-#if 0 // mem dump
-  currTarAddr = 0x000000;
-  uint8_t phw_ID = 0;
-  uint8_t xhw_ID = 0;
-  while (1) {
-	  debugSector = 0;
+  temocTests(); // Compile option test programs
 
-	  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-	  Single_Read(&hm95p32, sector, currTarAddr, 4096U); //get page with init data
-	  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-
-	  while(!debugSector){};
-	  currTarAddr += 4096U;
-  }
-
-#endif
-
-#if 0 // sensor tests
-  uint8_t phw_ID = 0;
-  uint8_t xhw_ID = 0;
-  while (1) {
-	  // pressure test
-	  HAL_Delay(100);
-	  phw_ID = 0;
-	  LPS22HH_ReadID(&hlps22, &phw_ID);
-
-  	  // xcel test
-	  HAL_Delay(100);
-	  xhw_ID = 0;
-	  LSM6DSR_ReadID(&hlsm6d, &xhw_ID);
-  }
-
-#endif
-
-#if 0 // pressure sensor reading test (checks for MEMS damage)
-  uint8_t tx_dump[6];
-  uint8_t rx_dump[6];
-  memset(tx_dump, 0, 6);
-  tx_dump[0] = 0xa8;
-  while (1) {
-	  HAL_GPIO_WritePin(GPIOC, PRESS_PIN, GPIO_PIN_RESET);
-	  BSP_SPI1_SendRecv(tx_dump, rx_dump, 6);
-	  HAL_GPIO_WritePin(GPIOC, PRESS_PIN, GPIO_PIN_SET);
-	  HAL_Delay(1000);
-  }
-#endif
-
-#if 0
-  M95p32_Reformat(); //clear memory
-  while(1){}
-#endif
-
-  HAL_Delay(1000); //10 sec for save interrupt
+  HAL_Delay(10000); //10 sec for save interrupt
   while (1)
   {
 	  dataFlag = 0;
@@ -194,6 +150,8 @@ int main(void)
 		  //get IMU data
 		  LSM6DSR_ACC_GetAxes(&hlsm6d, &nextFrame.currAcc);
 		  LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
+
+		  //todo process acc, alt, attitude
 	  }
 
 	  if(uwTick >= nextTick)
@@ -445,7 +403,7 @@ static void M95p32_Init(void)
 	//if saved now instead, errors would remove formatting page, losing all files
 }
 
-static void M95p32_Reformat(void)
+void M95p32_Reformat(void)
 {
 	/*
 	 * 512 page 0 format:
