@@ -25,6 +25,7 @@
 #include "lps22hh.h"
 #include "lsm6dsr.h"
 #include "m95p32.h"
+#include "FlightState.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,7 +52,9 @@ extern SPI_HandleTypeDef hspi1;
 LPS22HH_Object_t hlps22;
 LSM6DSR_Object_t hlsm6d;
 M95_Object_t     hm95p32;
+FlightState      fs = {0};
 volatile uint32_t currTarAddr;
+volatile uint32_t currDbgAddr;
 
 float gAltitude;
 float gTotalAcc;
@@ -67,6 +70,8 @@ static void Lsm6D_Init(void);
 static void M95p32_Init(void);
 static void M95p32_Close(void);
 void M95p32_Reformat(void);
+void M95p32_DebugPrint(const uint8_t*, uint32_t size);
+
 
 extern void temocTests();
 /* USER CODE END PFP */
@@ -126,6 +131,7 @@ int main(void)
   Lps22_Init();
   Lsm6D_Init();
   M95p32_Init();
+  initFlightState(&fs);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -139,58 +145,61 @@ int main(void)
   HAL_Delay(10000); //10 sec for save interrupt
   while (1)
   {
-	  dataFlag = 0;
-	  LPS22HH_PRESS_Get_DRDY_Status(&hlps22, &dataFlag);
-	  //LSM6DSR_ACC_Get_DRDY_Status(&hlsm6d, &dataFlag);
-	  if(dataFlag != 0)
-	  {
-		  //get pressure data
-		  LPS22HH_PRESS_GetPressure(&hlps22, &nextFrame.currPress);
-		  LPS22HH_TEMP_GetTemperature(&hlps22, &nextFrame.currTemp);
-		  //get IMU data
-		  LSM6DSR_ACC_GetAxes(&hlsm6d, &nextFrame.currAcc);
-		  LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
+    dataFlag = 0;
+    LPS22HH_PRESS_Get_DRDY_Status(&hlps22, &dataFlag);
+    //LSM6DSR_ACC_Get_DRDY_Status(&hlsm6d, &dataFlag);
+    if(dataFlag != 0)
+    {
+      //get pressure data
+      LPS22HH_PRESS_GetPressure(&hlps22, &nextFrame.currPress);
+      LPS22HH_TEMP_GetTemperature(&hlps22, &nextFrame.currTemp);
+      //get IMU data
+      LSM6DSR_ACC_GetAxes(&hlsm6d, &nextFrame.currAcc);
+      LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
 
-		  //todo process acc, alt, attitude
-	  }
+      //todo process acc, alt, attitude
+      gTotalAcc = ((float)nextFrame.currAcc.z)/1000.0;
+    }
 
-	  if(uwTick >= nextTick)
-	  {
-		  nextTick = uwTick + 50; //0.05s delay
+    updateState(&fs);
 
-		  //perform a memory store
-		  nextFrame.currTick = uwTick;
-		  memcpy(&stagedMem[memIndex], &nextFrame, sizeof(dataframe_t));
-		  ++memIndex;
+    if(uwTick >= nextTick)
+    {
+      nextTick = uwTick + 500; //0.05s delay
 
-		  if(memIndex >= 14) //mem block full
-		  {
-			  memIndex = 0;
-			  memFlag = 1;
-		  }
-	  }
+      //perform a memory store
+      nextFrame.currTick = uwTick;
+      memcpy(&stagedMem[memIndex], &nextFrame, sizeof(dataframe_t));
+      ++memIndex;
 
-	  if(memFlag != 0)
-	  {
-		  memFlag = 0;
-		  //block is ready to be stored
-		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-		  WRITE_ENABLE(&hm95p32);
-		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+      if(memIndex >= 14) //mem block full
+      {
+        memIndex = 0;
+        memFlag = 1;
+      }
+    }
 
-		  //this takes 0.5ms at minimum, can caused missed sensor cycle each 700msec
-		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-		  Page_Write(&hm95p32, (uint8_t*)stagedMem, currTarAddr, sizeof(stagedMem));
-		  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-		  currTarAddr += 0x200; //move address to next page
-		  if(currTarAddr >= 0x400000){
-			  // max data size reached
-			  __disable_irq();
-			  while(1)
-			  {
-			  }
-		  }
-	  }
+    if(memFlag != 0)
+    {
+      memFlag = 0;
+      //block is ready to be stored
+      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+      WRITE_ENABLE(&hm95p32);
+      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
+      //this takes 0.5ms at minimum, can caused missed sensor cycle each 700msec
+      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+      Page_Write(&hm95p32, (uint8_t*)stagedMem, currTarAddr, sizeof(stagedMem));
+      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+      currTarAddr += 0x200; //move address to next page
+      if(currTarAddr >= 0x400000){
+        // max data size reached
+        __disable_irq();
+        while(1)
+        {
+        }
+      }
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -310,96 +319,100 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 static void Lps22_Init(void)
 {
-	hlps22.IO.Init = (LPS22HH_Init_Func)BSP_SPI1_Init;
-	hlps22.IO.DeInit = (LPS22HH_DeInit_Func)BSP_SPI1_DeInit;
-	hlps22.IO.GetTick = (LPS22HH_GetTick_Func)HAL_GetTick;
-	hlps22.IO.Delay = (LPS22HH_Delay_Func)HAL_Delay;
-	hlps22.IO.BusType = 1U;
-	hlps22.Ctx.read_reg = ReadRegWrap;
-	hlps22.Ctx.write_reg = WriteRegWrap;
-	hlps22.Ctx.mdelay = HAL_Delay;
-	hlps22.Ctx.handle = &PRESS_PIN;
+  hlps22.IO.Init = (LPS22HH_Init_Func)BSP_SPI1_Init;
+  hlps22.IO.DeInit = (LPS22HH_DeInit_Func)BSP_SPI1_DeInit;
+  hlps22.IO.GetTick = (LPS22HH_GetTick_Func)HAL_GetTick;
+  hlps22.IO.Delay = (LPS22HH_Delay_Func)HAL_Delay;
+  hlps22.IO.BusType = 1U;
+  hlps22.Ctx.read_reg = ReadRegWrap;
+  hlps22.Ctx.write_reg = WriteRegWrap;
+  hlps22.Ctx.mdelay = HAL_Delay;
+  hlps22.Ctx.handle = &PRESS_PIN;
 
-	LPS22HH_Init(&hlps22);
+  LPS22HH_Init(&hlps22);
 
-	LPS22HH_PRESS_Enable(&hlps22);
-	LPS22HH_TEMP_Enable(&hlps22);
-	LPS22HH_PRESS_SetOutputDataRate(&hlps22, 200.0f);
-	LPS22HH_TEMP_SetOutputDataRate(&hlps22, 200.0f);
+  LPS22HH_PRESS_Enable(&hlps22);
+  LPS22HH_TEMP_Enable(&hlps22);
+  LPS22HH_PRESS_SetOutputDataRate(&hlps22, 200.0f);
+  LPS22HH_TEMP_SetOutputDataRate(&hlps22, 200.0f);
 }
 
 static void Lsm6D_Init(void)
 {
-	hlsm6d.IO.Init = (LSM6DSR_Init_Func)BSP_SPI1_Init;
-	hlsm6d.IO.DeInit = (LSM6DSR_DeInit_Func)BSP_SPI1_DeInit;
-	hlsm6d.IO.GetTick = (LSM6DSR_GetTick_Func)HAL_GetTick;
-	hlsm6d.IO.Delay = (LSM6DSR_Delay_Func)HAL_Delay;
-	hlsm6d.IO.BusType = 1U;
-	hlsm6d.Ctx.read_reg = ReadRegWrap;
-	hlsm6d.Ctx.write_reg = WriteRegWrap;
-	hlsm6d.Ctx.mdelay = HAL_Delay;
-	hlsm6d.Ctx.handle = &IMU_PIN;
+  hlsm6d.IO.Init = (LSM6DSR_Init_Func)BSP_SPI1_Init;
+  hlsm6d.IO.DeInit = (LSM6DSR_DeInit_Func)BSP_SPI1_DeInit;
+  hlsm6d.IO.GetTick = (LSM6DSR_GetTick_Func)HAL_GetTick;
+  hlsm6d.IO.Delay = (LSM6DSR_Delay_Func)HAL_Delay;
+  hlsm6d.IO.BusType = 1U;
+  hlsm6d.Ctx.read_reg = ReadRegWrap;
+  hlsm6d.Ctx.write_reg = WriteRegWrap;
+  hlsm6d.Ctx.mdelay = HAL_Delay;
+  hlsm6d.Ctx.handle = &IMU_PIN;
 
-	LSM6DSR_Init(&hlsm6d);
+  LSM6DSR_Init(&hlsm6d);
 
-	LSM6DSR_ACC_Enable(&hlsm6d);
-	LSM6DSR_ACC_SetOutputDataRate(&hlsm6d, 208.0f);
-	LSM6DSR_ACC_SetFullScale(&hlsm6d, 16U);
+  LSM6DSR_ACC_Enable(&hlsm6d);
+  LSM6DSR_ACC_SetOutputDataRate(&hlsm6d, 208.0f);
+  LSM6DSR_ACC_SetFullScale(&hlsm6d, 16U);
 
-	LSM6DSR_GYRO_Enable(&hlsm6d);
-	LSM6DSR_GYRO_SetOutputDataRate(&hlsm6d, 208.0f);
-	LSM6DSR_GYRO_SetFullScale(&hlsm6d, 2000U);
+  LSM6DSR_GYRO_Enable(&hlsm6d);
+  LSM6DSR_GYRO_SetOutputDataRate(&hlsm6d, 208.0f);
+  LSM6DSR_GYRO_SetFullScale(&hlsm6d, 2000U);
 }
 
 static void M95p32_Init(void)
 {
-	/*
-	 * Memory Architecture:
-	 * - 4 194 304 bytes
-	 * - 512 bytes per page
-	 * - 8 pages per sector
-	 * - 16 sectors per block
-	 * - 64 blocks total
-	 *
-	 * Erase operations must stay within a block, sector, or page
-	 * Write operations must stay within the page, a new call is needed to span a boundary
-	 * Reads are unlimited
-	 *
-	 * page 0 (0x000 - 0x1FF) stores init data and file locations
-	 * pages 1 and up contain 1 stagedMem array per page, with file boundaries defined in page 0
-	 *
-	 */
+ /*
+  * Memory Architecture:
+  * - 4 194 304 bytes
+  * - 512 bytes per page
+  * - 8 pages per sector
+  * - 16 sectors per block
+  * - 64 blocks total
+  *
+  * Erase operations must stay within a block, sector, or page
+  * Write operations must stay within the page, a new call is needed to span a boundary
+  * Reads are unlimited
+  *
+  * page 0 (0x000 - 0x1FF) stores init data and file locations
+  * pages 1 and up contain 1 stagedMem array per page, with file boundaries defined in page 0
+  *
+  */
 
-	hm95p32.IO.Init = (M95_Init_Func)BSP_SPI1_Init;
-	hm95p32.IO.DeInit = (M95_DeInit_Func)BSP_SPI1_DeInit;
-	hm95p32.IO.Delay = (M95_Delay)HAL_Delay;
-	hm95p32.IO.Read = BSP_SPI1_Recv;
-	hm95p32.IO.Write = BSP_SPI1_Send;
+  hm95p32.IO.Init = (M95_Init_Func)BSP_SPI1_Init;
+  hm95p32.IO.DeInit = (M95_DeInit_Func)BSP_SPI1_DeInit;
+  hm95p32.IO.Delay = (M95_Delay)HAL_Delay;
+  hm95p32.IO.Read = BSP_SPI1_Recv;
+  hm95p32.IO.Write = BSP_SPI1_Send;
 
-	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-	WRITE_ENABLE(&hm95p32);
-	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  WRITE_ENABLE(&hm95p32);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
-	memset(mem_InitBlock, 0, 512U);
-	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-	Single_Read(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U); //get page with init data
-	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+  memset(mem_InitBlock, 0, 512U);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  Single_Read(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U); //get page with init data
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
-	if(mem_InitBlock[0] != 0xa5a5a5a5)
-	{
-		//the eeprom has not been formatted
-		M95p32_Reformat();
-	}
+  if(mem_InitBlock[0] != 0xa5a5a5a5)
+  {
+    //the eeprom has not been formatted
+    M95p32_Reformat();
+  }
 
-	mem_InitBlock[1] += 1; //start another file
-	currTarAddr = mem_InitBlock[mem_InitBlock[1]]; //start where previous file ends
-	if(currTarAddr == 1) //new file system
-	{
-		currTarAddr = 0x000200;
-	}
-	//we do not save in new file count
-	//error saving at end of flight results in potential loss of a file
-	//if saved now instead, errors would remove formatting page, losing all files
+  mem_InitBlock[1] += 1; //start another file
+  currTarAddr = mem_InitBlock[mem_InitBlock[1]]; //start where previous file ends
+  if(currTarAddr == 1) //new file system
+  {
+    currTarAddr = 0x000400;
+  }
+  //we do not save in new file count
+  //error saving at end of flight results in potential loss of a file
+  //if saved now instead, errors would remove formatting page, losing all files
+  currDbgAddr = 0x000200;
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  Page_Erase(&hm95p32, 0x000200);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 }
 
 void M95p32_Reformat(void)
@@ -436,12 +449,30 @@ void M95p32_Reformat(void)
 
 static void M95p32_Close(void)
 {
-	//saves end of file telling next file where to start
-	mem_InitBlock[mem_InitBlock[1] + 1] = currTarAddr;
+  //saves end of file telling next file where to start
+  mem_InitBlock[mem_InitBlock[1] + 1] = currTarAddr;
 
-	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-	Page_Write(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U);
-	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  WRITE_ENABLE(&hm95p32);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+  __NOP();
+  __NOP();
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  Page_Write(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+}
+
+void M95p32_DebugPrint(const uint8_t* data, uint32_t size)
+{
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  WRITE_ENABLE(&hm95p32);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+  __NOP();
+  __NOP();
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  Page_Prog(&hm95p32, data, currDbgAddr, size);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+  currDbgAddr += size;
 }
 
 /**
@@ -453,11 +484,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if(GPIO_Pin == USERSENSE_Pin)
   {
-	__disable_irq();
-	while(1)
-	{
-	}
-    //debugSector = 1;
+    __disable_irq();
+    currTarAddr = 0x000000;
+    uint8_t phw_ID = 0;
+    uint8_t xhw_ID = 0;
+    while (1) {
+      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+      Single_Read(&hm95p32, sector, currTarAddr, 4096U); //get page with init data
+      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+    }
+  //debugSector = 1;
   }
 
 }

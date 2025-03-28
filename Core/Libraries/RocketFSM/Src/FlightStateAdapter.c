@@ -31,15 +31,19 @@ extern float gDegOffVert;
 extern volatile uint32_t uwTick;
 
 
+/* Extern Functions */
+extern void M95p32_DebugPrint(const uint8_t*, uint32_t size);
+
+
 /* Private Variables */
 float prevAlt = 0;
 uint32_t transDelay = UINT32_MAX;
 
 
 /* Constant Defines */
-#define LAUNCH_ACC_THRESH_G     5.0     // Threshold acceleration to indicate launch
+#define LAUNCH_ACC_THRESH_G     1.6     // Threshold acceleration to indicate launch
 #define LAUNCH_DEBOUNCE_MS      100     // Burn for 0.1 sec before trigger
-#define BURNOUT_ACC_THRESH_G    2.0     // Lower acceleration bound to indicate burn end
+#define BURNOUT_ACC_THRESH_G    1.3     // Lower acceleration bound to indicate burn end
 #define MAX_BURN_TIME_MS        6000    // Burn state timeout to catch error
 #define APOGEE_SAMPLE_PERIOD_MS 500     // Descent detection altitude sample compare period
 #define MAIN_DEPLOY_ALTITUDE    1000.0  // End of drogue descent (ft)
@@ -47,15 +51,15 @@ uint32_t transDelay = UINT32_MAX;
 
 
 /* Redefined Callback Implementations, Called when new state is entered */
-void enterIdle(void) { printf("New: Entering Idle state.\n"); }
-void enterArmed(void) { printf("New: Entering Armed state.\n"); }
-void enterDisarm(void) { printf("New: Entering Disarm state.\n"); }
-void enterBurning(void) { printf("New: Entering Burning state.\n"); }
-void enterRising(void) { printf("New: Entering Rising state.\n"); }
-void enterApogee(void) { printf("New: Entering Apogee state.\n"); }
-void enterDrogueDescent(void) { printf("New: Entering Drogue Descent state.\n"); }
-void enterMainDescent(void) { printf("New: Entering Main Descent state.\n"); }
-void enterLanded(void) { printf("New: Entering Landed state.\n"); }
+void enterIdle(void) { uint32_t nextprint[2] = {1, uwTick}; M95p32_DebugPrint((uint8_t*)nextprint, 8U); }
+void enterArmed(void) { uint32_t nextprint[2] = {2, uwTick}; M95p32_DebugPrint((uint8_t*)nextprint, 8U); }
+void enterDisarm(void) { uint32_t nextprint[2] = {3, uwTick}; M95p32_DebugPrint((uint8_t*)nextprint, 8U); }
+void enterBurning(void) { uint32_t nextprint[2] = {4, uwTick}; M95p32_DebugPrint((uint8_t*)nextprint, 8U); }
+void enterRising(void) { uint32_t nextprint[2] = {5, uwTick}; M95p32_DebugPrint((uint8_t*)nextprint, 8U); }
+void enterApogee(void) { uint32_t nextprint[2] = {6, uwTick}; M95p32_DebugPrint((uint8_t*)nextprint, 8U); }
+void enterDrogueDescent(void) { uint32_t nextprint[2] = {7, uwTick}; M95p32_DebugPrint((uint8_t*)nextprint, 8U); }
+void enterMainDescent(void) { uint32_t nextprint[2] = {8, uwTick}; M95p32_DebugPrint((uint8_t*)nextprint, 8U); }
+void enterLanded(void) { uint32_t nextprint[2] = {9, uwTick}; M95p32_DebugPrint((uint8_t*)nextprint, 8U); }
 
 /*
  * Redefined Transition Functions, true moves to next.
@@ -106,6 +110,7 @@ bool burningExitTransition(void)
     transDelay = uwTick; // Rising state requires end of burn timestamp (i.e NOW!)
     return true;
   }
+  return false;
 }
 
 bool risingExitTransition(void)

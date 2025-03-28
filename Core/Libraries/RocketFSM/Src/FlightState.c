@@ -20,7 +20,7 @@
  * STATE_LANDED
  */
 
-#include "flightState.h"
+#include "FlightState.h"
 #include <stdio.h>
 
 /* Default Callback Implementations */
