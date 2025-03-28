@@ -690,7 +690,7 @@ static int32_t LPS22HH_Initialize(LPS22HH_Object_t *pObj)
     return LPS22HH_ERROR;
   }
 
-  pObj->last_odr = LPS22HH_200_Hz;
+  pObj->last_odr = LPS22HH_25_Hz;
 
   return LPS22HH_OK;
 }
