@@ -2,6 +2,8 @@
 #define FLIGHT_STATE_H
 
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdint.h>
 
 // Define the possible flight states.
 typedef enum {

@@ -1,3 +1,4 @@
+
 #include "FlightState.h"
 #include <stdio.h>
 
@@ -13,19 +14,20 @@ __attribute__((weak)) void enterMainDescent(void) { printf("Default: Entering Ma
 __attribute__((weak)) void enterLanded(void) { printf("Default: Entering Landed state.\n"); }
 
 /* Default Transition Functions - Return true if the transition condition is met */
-__attribute__((weak)) bool idleTransition(void) { return true; }
-__attribute__((weak)) bool armedTransition(void) { return true; }
-__attribute__((weak)) bool disarmTransition(void) { return true; }
-__attribute__((weak)) bool burningTransition(void) { return true; }
-__attribute__((weak)) bool risingTransition(void) { return true; }
-__attribute__((weak)) bool apogeeTransition(void) { return true; }
-__attribute__((weak)) bool drogueDescentTransition(void) { return true; }
-__attribute__((weak)) bool mainDescentTransition(void) { return true; }
-__attribute__((weak)) bool landedTransition(void) { return true; }
+__attribute__((weak)) bool idleExitTransition(void) { return true; }
+__attribute__((weak)) bool armedExitTransition(void) { return true; }
+__attribute__((weak)) bool disarmExitTransition(void) { return true; }
+__attribute__((weak)) bool burningExitTransition(void) { return true; }
+__attribute__((weak)) bool risingExitTransition(void) { return true; }
+__attribute__((weak)) bool apogeeExitTransition(void) { return true; }
+__attribute__((weak)) bool drogueDescentExitTransition(void) { return true; }
+__attribute__((weak)) bool mainDescentExitTransition(void) { return true; }
+__attribute__((weak)) bool landedExitTransition(void) { return true; }
 
-/* Initialization function for FlightState.
-   Users can override weak functions or modify the structure after initialization.
-*/
+/*
+ * Initialization function for FlightState.
+ * Users can override weak functions or modify the structure after initialization.
+ */
 void initFlightState(FlightState *fs) {
     fs->currentState = STATE_IDLE;
 
@@ -39,15 +41,15 @@ void initFlightState(FlightState *fs) {
     fs->enterMainDescent     = enterMainDescent;
     fs->enterLanded          = enterLanded;
 
-    fs->idleTransition          = idleTransition;
-    fs->armedTransition         = armedTransition;
-    fs->disarmTransition        = disarmTransition;
-    fs->burningTransition       = burningTransition;
-    fs->risingTransition        = risingTransition;
-    fs->apogeeTransition        = apogeeTransition;
-    fs->drogueDescentTransition = drogueDescentTransition;
-    fs->mainDescentTransition   = mainDescentTransition;
-    fs->landedTransition        = landedTransition;
+    fs->idleTransition          = idleExitTransition;
+    fs->armedTransition         = armedExitTransition;
+    fs->disarmTransition        = disarmExitTransition;
+    fs->burningTransition       = burningExitTransition;
+    fs->risingTransition        = risingExitTransition;
+    fs->apogeeTransition        = apogeeExitTransition;
+    fs->drogueDescentTransition = drogueDescentExitTransition;
+    fs->mainDescentTransition   = mainDescentExitTransition;
+    fs->landedTransition        = landedExitTransition;
 
     // Note: The user can override these weak functions or modify fs after init.
 }
@@ -68,9 +70,10 @@ static const char* stateToString(State state) {
     }
 }
 
-/* updateState() checks if the transition function returns true.
-   If so, it moves to the next state in sequence.
-*/
+/*
+ * updateState() checks if the transition function returns true.
+ * If so, it moves to the next state in sequence.
+ */
 void updateState(FlightState *fs) {
     bool shouldTransition = false;
     State newState = fs->currentState;
