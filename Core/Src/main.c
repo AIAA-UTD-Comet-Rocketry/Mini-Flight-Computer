@@ -497,6 +497,17 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   }
 
 }
+
+
+int _write(int le, char *ptr, int len)
+{
+	int DataIdx;
+	for(DataIdx = 0; DataIdx < len; DataIdx++)
+	{
+		ITM_SendChar(*ptr++);
+	}
+	return len;
+}
 /* USER CODE END 4 */
 
 /**
