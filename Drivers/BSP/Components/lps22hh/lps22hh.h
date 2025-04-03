@@ -177,9 +177,9 @@ typedef union
 /** @addtogroup LPS22HH_Exported_Functions LPS22HH Exported Functions
   * @{
   */
-
 int32_t ReadRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length);
 int32_t WriteRegWrap(void *Handle, uint8_t Reg, uint8_t *pData, uint16_t Length);
+
 int32_t LPS22HH_RegisterBusIO(LPS22HH_Object_t *pObj, LPS22HH_IO_t *pIO);
 int32_t LPS22HH_Init(LPS22HH_Object_t *pObj);
 int32_t LPS22HH_DeInit(LPS22HH_Object_t *pObj);
