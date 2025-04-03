@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -25,6 +26,7 @@
 #include "lps22hh.h"
 #include "lsm6dsr.h"
 #include "m95p32.h"
+#include "usbd_cdc_if.h"
 #include "FlightState.h"
 /* USER CODE END Includes */
 
@@ -45,6 +47,7 @@ uint16_t IMU_PIN = IMU_CS_Pin;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+CRC_HandleTypeDef hcrc;
 
 /* USER CODE BEGIN PV */
 extern __IO uint32_t uwTick;
@@ -64,6 +67,7 @@ float gDegOffVert;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
 static void Lps22_Init(void);
 static void Lsm6D_Init(void);
@@ -126,7 +130,18 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_USB_DEVICE_Init();
+  MX_CRC_Init();
+  
   /* USER CODE BEGIN 2 */
+  //USB Test Code Begin
+  while (1)
+  {
+	  printf("Testing USB Port\n");
+	  HAL_Delay(1000);
+  }
+  //USB Test Code End
+
   BSP_SPI1_Init();
   Lps22_Init();
   Lsm6D_Init();
@@ -142,7 +157,9 @@ int main(void)
 
   temocTests(); // Compile option test programs
 
+
   HAL_Delay(10000); //10 sec for save interrupt
+
   while (1)
   {
     dataFlag = 0;
@@ -224,15 +241,14 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 16;
-  RCC_OscInitStruct.PLL.PLLN = 160;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 72;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLQ = 3;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -251,6 +267,32 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
+
 }
 
 /**
@@ -495,7 +537,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
   //debugSector = 1;
   }
-
 }
 
 
@@ -509,6 +550,14 @@ int _write(int le, char *ptr, int len)
 	return len;
 }
 /* USER CODE END 4 */
+
+//Modify the existing _write() from syscalls.c
+int __io_putchar(int ch)
+{
+	uint8_t buffer = (uint8_t)ch;
+	CDC_Transmit_FS(&buffer, 1); //send ch via USB
+	return ch;
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.

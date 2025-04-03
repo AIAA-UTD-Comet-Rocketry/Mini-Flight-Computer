@@ -1,24 +1,3 @@
-/*
- * General flight logic that would apply to every flight computer firmware belongs
- * in the FlightState.c file.
- * All callbacks should be defined in implementation.
- *
- * STATE_IDLE <---------
- *      |               ^
- * STATE_ARMED --> STATE_DISARM
- *      |
- * STATE_BURNING
- *      |
- * STATE_RISING
- *      |
- * STATE_APOGEE
- *      |
- * STATE_DROGUE_DESCENT
- *      |
- * STATE_MAIN_DESCENT
- *      |
- * STATE_LANDED
- */
 
 #include "FlightState.h"
 #include <stdio.h>
