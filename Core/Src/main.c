@@ -26,6 +26,7 @@
 #include "lsm6dsr.h"
 #include "m95p32.h"
 #include "FlightState.h"
+#include "motion_gc.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,6 +60,17 @@ volatile uint32_t currDbgAddr;
 float gAltitude;
 float gTotalAcc;
 float gDegOffVert;
+
+/* MotionGC variables */
+MGC_mcu_type_t mcu_type = MGC_MCU_STM32;
+MGC_knobs_t knobs;
+MGC_input_t data_in;
+MGC_output_t data_out;
+int bias_update;
+float sample_freq = 50.0f; // Adjust sample frequency as needed
+int VERSION_STR_LENG = 35;
+//knobs.GyroThr = 0.15; //Adjust knob settings
+//MotionGC_SetKnobs(&knobs);
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -72,8 +84,12 @@ static void M95p32_Close(void);
 void M95p32_Reformat(void);
 void M95p32_DebugPrint(const uint8_t*, uint32_t size);
 
-
 extern void temocTests();
+
+static void MotionGC_Init(void);
+/* Update and calibrate gyro data */
+static void CalibrateGyroData(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -132,6 +148,7 @@ int main(void)
   Lsm6D_Init();
   M95p32_Init();
   initFlightState(&fs);
+  MotionGC_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -143,6 +160,7 @@ int main(void)
   temocTests(); // Compile option test programs
 
   HAL_Delay(10000); //10 sec for save interrupt
+
   while (1)
   {
     dataFlag = 0;
@@ -155,7 +173,11 @@ int main(void)
       LPS22HH_TEMP_GetTemperature(&hlps22, &nextFrame.currTemp);
       //get IMU data
       LSM6DSR_ACC_GetAxes(&hlsm6d, &nextFrame.currAcc);
+      //LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
       LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
+
+      // Calibrate gyroscope and update frame data
+      CalibrateGyroData();
 
       //todo process acc, alt, attitude
       gTotalAcc = ((float)nextFrame.currAcc.z)/1000.0;
@@ -523,6 +545,30 @@ void Error_Handler(void)
   {
   }
   /* USER CODE END Error_Handler_Debug */
+}
+
+/* Initialize the MotionGC library */
+static void MotionGC_Init(void) {
+	char lib_version[VERSION_STR_LENG];
+	MotionGC_Initialize(mcu_type, &sample_freq); // Initialize with sample frequency
+	MotionGC_GetLibVersion(lib_version); // Get the library version
+	//printf("MotionGC Library Version: %s\n", lib_version);
+}
+
+/* Update and calibrate gyro data */
+static void CalibrateGyroData(void) {
+	LSM6DSR_Axes_t gyro_data;
+	LSM6DSR_GYRO_GetAxes(&hlsm6d, &gyro_data); // Get angular rate from LSM6DSR
+	MotionGC_Update(&data_in, &data_out, &bias_update); // Calculate the compensated gyroscope data
+
+	data_in.Gyro[0] = gyro_data.x;
+	data_in.Gyro[1] = gyro_data.y;
+	data_in.Gyro[2] = gyro_data.z;
+
+	// Now data_out contains the corrected gyro biases
+//	float gyro_cal_x = data_in.Gyro[0] - data_out.GyroBiasX;
+//	float gyro_cal_y = data_in.Gyro[1] - data_out.GyroBiasY;
+//	float gyro_cal_z = data_in.Gyro[2] - data_out.GyroBiasZ;
 }
 
 #ifdef  USE_FULL_ASSERT
