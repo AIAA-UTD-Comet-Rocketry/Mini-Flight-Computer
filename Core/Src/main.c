@@ -27,6 +27,7 @@
 #include "m95p32.h"
 #include "FlightState.h"
 #include "motion_gc.h"
+#include "motion_ac.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,14 +64,12 @@ float gDegOffVert;
 
 /* MotionGC variables */
 MGC_mcu_type_t mcu_type = MGC_MCU_STM32;
-MGC_knobs_t knobs;
-MGC_input_t data_in;
-MGC_output_t data_out;
-int bias_update;
-float sample_freq = 50.0f; // Adjust sample frequency as needed
+MGC_knobs_t gc_knobs;
+MGC_output_t gc_data_out;
+float sample_freq = 100.0f; // Adjust sample frequency as needed
+MAC_knobs_t ac_knobs;
+MAC_output_t ac_data_out;
 int VERSION_STR_LENG = 35;
-//knobs.GyroThr = 0.15; //Adjust knob settings
-//MotionGC_SetKnobs(&knobs);
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -87,8 +86,10 @@ void M95p32_DebugPrint(const uint8_t*, uint32_t size);
 extern void temocTests();
 
 static void MotionGC_Init(void);
-/* Update and calibrate gyro data */
-static void CalibrateGyroData(void);
+static int CalibrateGyroData(void);
+
+static void MotionAC_Init(void);
+static uint8_t CalibrateAccData(void);
 
 /* USER CODE END PFP */
 
@@ -149,6 +150,7 @@ int main(void)
   M95p32_Init();
   initFlightState(&fs);
   MotionGC_Init();
+  MotionAC_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -158,6 +160,16 @@ int main(void)
   uint8_t memFlag = 0;
 
   temocTests(); // Compile option test programs
+
+  bool calibrated = false;
+  uint32_t lastTick = uwTick;
+  while(!calibrated)
+  {
+    if(uwTick > lastTick) // 1ms passed
+    {
+      calibrated = CalibrateAccData() && !CalibrateGyroData();
+    }
+  }
 
   HAL_Delay(10000); //10 sec for save interrupt
 
@@ -355,8 +367,8 @@ static void Lps22_Init(void)
 
   LPS22HH_PRESS_Enable(&hlps22);
   LPS22HH_TEMP_Enable(&hlps22);
-  LPS22HH_PRESS_SetOutputDataRate(&hlps22, 200.0f);
-  LPS22HH_TEMP_SetOutputDataRate(&hlps22, 200.0f);
+  LPS22HH_PRESS_SetOutputDataRate(&hlps22, 100.0f);
+  LPS22HH_TEMP_SetOutputDataRate(&hlps22, 100.0f);
 }
 
 static void Lsm6D_Init(void)
@@ -374,11 +386,11 @@ static void Lsm6D_Init(void)
   LSM6DSR_Init(&hlsm6d);
 
   LSM6DSR_ACC_Enable(&hlsm6d);
-  LSM6DSR_ACC_SetOutputDataRate(&hlsm6d, 208.0f);
+  LSM6DSR_ACC_SetOutputDataRate(&hlsm6d, 104.0f);
   LSM6DSR_ACC_SetFullScale(&hlsm6d, 16U);
 
   LSM6DSR_GYRO_Enable(&hlsm6d);
-  LSM6DSR_GYRO_SetOutputDataRate(&hlsm6d, 208.0f);
+  LSM6DSR_GYRO_SetOutputDataRate(&hlsm6d, 104.0f);
   LSM6DSR_GYRO_SetFullScale(&hlsm6d, 2000U);
 }
 
@@ -549,27 +561,59 @@ void Error_Handler(void)
 
 /* Initialize the MotionGC library */
 static void MotionGC_Init(void) {
-	char lib_version[VERSION_STR_LENG];
 	MotionGC_Initialize(mcu_type, &sample_freq); // Initialize with sample frequency
-	MotionGC_GetLibVersion(lib_version); // Get the library version
-	//printf("MotionGC Library Version: %s\n", lib_version);
 }
 
 /* Update and calibrate gyro data */
-static void CalibrateGyroData(void) {
-	LSM6DSR_Axes_t gyro_data;
-	LSM6DSR_GYRO_GetAxes(&hlsm6d, &gyro_data); // Get angular rate from LSM6DSR
-	MotionGC_Update(&data_in, &data_out, &bias_update); // Calculate the compensated gyroscope data
+static int CalibrateGyroData(void) {
+  MGC_input_t data_in;
+  LSM6DSR_Axes_t gyro_data;
+  LSM6DSR_Axes_t acc_data;
+  LSM6DSR_ACC_GetAxes(&hlsm6d, &acc_data);
+  LSM6DSR_GYRO_GetAxes(&hlsm6d, &gyro_data); // Get angular rate from LSM6DSR
 
-	data_in.Gyro[0] = gyro_data.x;
-	data_in.Gyro[1] = gyro_data.y;
-	data_in.Gyro[2] = gyro_data.z;
+  // data cast and copy - mdps -> dps & mg -> g
+  data_in.Acc[0]  = ((float)acc_data.x)/1000.0;
+  data_in.Acc[1]  = ((float)acc_data.y)/1000.0;
+  data_in.Acc[2]  = ((float)acc_data.z)/1000.0;
+  data_in.Gyro[0] = ((float)gyro_data.x)/1000.0;
+  data_in.Gyro[1] = ((float)gyro_data.y)/1000.0;
+  data_in.Gyro[2] = ((float)gyro_data.z)/1000.0;
 
-	// Now data_out contains the corrected gyro biases
-//	float gyro_cal_x = data_in.Gyro[0] - data_out.GyroBiasX;
-//	float gyro_cal_y = data_in.Gyro[1] - data_out.GyroBiasY;
-//	float gyro_cal_z = data_in.Gyro[2] - data_out.GyroBiasZ;
+  int bias_updated = 1;
+  MotionGC_Update(&data_in, &gc_data_out, &bias_updated); // Calculate the compensated gyroscope data
+
+  return bias_updated;
 }
+
+/* Initialize the MotionAC library */
+static void MotionAC_Init(void) {
+	MotionAC_Initialize(true); // Initialize with sample frequency
+	MotionAC_GetKnobs(&ac_knobs);
+
+	ac_knobs.Sample_ms = 1;
+
+	MotionAC_SetKnobs(&ac_knobs);
+}
+
+/* Update and calibrate accel data */
+static uint8_t CalibrateAccData(void) {
+  MAC_input_t data_in;
+  LSM6DSR_Axes_t acc_data;
+  LSM6DSR_ACC_GetAxes(&hlsm6d, &acc_data);
+
+  // data cast and copy - mdps -> dps & mg -> g
+  data_in.Acc[0]  = ((float)acc_data.x)/1000.0;
+  data_in.Acc[1]  = ((float)acc_data.y)/1000.0;
+  data_in.Acc[2]  = ((float)acc_data.z)/1000.0;
+  data_in.TimeStamp = uwTick;
+
+  uint8_t is_calibrated = 0;
+  MotionAC_Update(&data_in, &is_calibrated); // Calculate the compensated gyroscope data
+
+  return is_calibrated;
+}
+
 
 #ifdef  USE_FULL_ASSERT
 /**
