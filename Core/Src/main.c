@@ -51,8 +51,8 @@ uint16_t IMU_PIN = IMU_CS_Pin;
 /* USER CODE BEGIN PV */
 extern __IO uint32_t uwTick;
 extern SPI_HandleTypeDef hspi1;
-LPS22HH_Object_t hlps22;
-LSM6DSR_Object_t hlsm6d;
+LPS22HH_Object_t hlps22; //pressure + barometer
+LSM6DSR_Object_t hlsm6d; //acc + gyro
 M95_Object_t     hm95p32;
 FlightState      fs = {0};
 volatile uint32_t currTarAddr;
@@ -62,14 +62,16 @@ float gAltitude;
 float gTotalAcc;
 float gDegOffVert;
 
-/* MotionGC variables */
+/* MotionGC/AC variables */
 MGC_mcu_type_t mcu_type = MGC_MCU_STM32;
 MGC_knobs_t gc_knobs;
 MGC_output_t gc_data_out;
-float sample_freq = 100.0f; // Adjust sample frequency as needed
+float sample_freq = 100.0f; // 100hz
 MAC_knobs_t ac_knobs;
 MAC_output_t ac_data_out;
 int VERSION_STR_LENG = 35;
+#define MOTIONAC_CAL_MAGIC 0xACCA1B1E
+#define MOTIONAC_CAL_ADDR  0x000100  // Reserved page after init block
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -87,9 +89,11 @@ extern void temocTests();
 
 static void MotionGC_Init(void);
 static int CalibrateGyroData(void);
+static void ApplyGyroCalibration(LSM6DSR_Axes_t *);
 
 static void MotionAC_Init(void);
 static uint8_t CalibrateAccData(void);
+static void ApplyAccCalibration(LSM6DSR_Axes_t *);
 
 /* USER CODE END PFP */
 
@@ -103,6 +107,13 @@ typedef struct
 	LSM6DSR_Axes_t	currGyro;
 	uint32_t		currTick;
 } dataframe_t;
+
+typedef struct
+{
+  float x;
+  float y;
+  float z;
+} data_3d;
 
 dataframe_t nextFrame __attribute__((aligned (4))); //aligned for faster data transfer
 dataframe_t stagedMem[14] __attribute__((aligned (4)));
@@ -153,26 +164,28 @@ int main(void)
   MotionAC_Init();
   /* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
   uint8_t dataFlag = 0;
-  uint32_t nextTick = 0;
   uint8_t memFlag = 0;
 
   temocTests(); // Compile option test programs
 
+  /* USER CODE BEGIN calibrate */
   bool calibrated = false;
-  uint32_t lastTick = uwTick;
+  uint32_t nextTick = uwTick;
   while(!calibrated)
   {
-    if(uwTick > lastTick) // 1ms passed
+    if(uwTick > nextTick) // 10ms passed
     {
-      calibrated = CalibrateAccData() && !CalibrateGyroData();
+    	nextTick = uwTick + 10;
+		calibrated = CalibrateAccData() && !CalibrateGyroData();
     }
   }
+  /* USER CODE END calibrate */
 
   HAL_Delay(10000); //10 sec for save interrupt
 
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
   while (1)
   {
     dataFlag = 0;
@@ -180,22 +193,20 @@ int main(void)
     //LSM6DSR_ACC_Get_DRDY_Status(&hlsm6d, &dataFlag);
     if(dataFlag != 0)
     {
-      //get pressure data
-      LPS22HH_PRESS_GetPressure(&hlps22, &nextFrame.currPress);
-      LPS22HH_TEMP_GetTemperature(&hlps22, &nextFrame.currTemp);
-      //get IMU data
-      LSM6DSR_ACC_GetAxes(&hlsm6d, &nextFrame.currAcc);
-      //LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
-      LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
+		//get pressure data
+		LPS22HH_PRESS_GetPressure(&hlps22, &nextFrame.currPress);
+		LPS22HH_TEMP_GetTemperature(&hlps22, &nextFrame.currTemp);
 
-      // Calibrate gyroscope and update frame data
-      CalibrateGyroData();
+		LSM6DSR_GYRO_GetAxes(&hlsm6d, &nextFrame.currGyro);
+		LSM6DSR_ACC_GetAxes(&hlsm6d, &nextFrame.currAcc);
 
-      //todo process acc, alt, attitude
-      gTotalAcc = ((float)nextFrame.currAcc.z)/1000.0;
+		//apply calibration bias to raw values:
+		ApplyGyroCalibration(&nextFrame.currGyro);
+		ApplyAccCalibration(&nextFrame.currAcc);
     }
 
     updateState(&fs);
+
 
     if(uwTick >= nextTick)
     {
@@ -559,12 +570,13 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 
+/* USER CODE BEGIN MEMS1 */
 /* Initialize the MotionGC library */
 static void MotionGC_Init(void) {
 	MotionGC_Initialize(mcu_type, &sample_freq); // Initialize with sample frequency
 }
 
-/* Update and calibrate gyro data */
+/* Calibrate gyroscope sensor (LSM6DSR) */
 static int CalibrateGyroData(void) {
   MGC_input_t data_in;
   LSM6DSR_Axes_t gyro_data;
@@ -581,9 +593,21 @@ static int CalibrateGyroData(void) {
   data_in.Gyro[2] = ((float)gyro_data.z)/1000.0;
 
   int bias_updated = 1;
-  MotionGC_Update(&data_in, &gc_data_out, &bias_updated); // Calculate the compensated gyroscope data
+  // Calculate the compensated gyroscope data
+  MotionGC_Update(&data_in, &gc_data_out, &bias_updated);
 
   return bias_updated;
+}
+
+void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
+	MAC_output_t data_out;
+
+	/* Get Calibration coeficients */
+	MotionAC_GetCalParams(&data_out);
+
+	currAcc->x = (currAcc->x - data_out.AccBias[0])* data_out.SF_Matrix[0][0];
+	currAcc->y = (currAcc->y - data_out.AccBias[1])* data_out.SF_Matrix[1][1];
+	currAcc->z = (currAcc->z - data_out.AccBias[2])* data_out.SF_Matrix[2][2];
 }
 
 /* Initialize the MotionAC library */
@@ -596,7 +620,7 @@ static void MotionAC_Init(void) {
 	MotionAC_SetKnobs(&ac_knobs);
 }
 
-/* Update and calibrate accel data */
+/* Calibrate accelerometer sensor (LSM6DSR)*/
 static uint8_t CalibrateAccData(void) {
   MAC_input_t data_in;
   LSM6DSR_Axes_t acc_data;
@@ -609,11 +633,64 @@ static uint8_t CalibrateAccData(void) {
   data_in.TimeStamp = uwTick;
 
   uint8_t is_calibrated = 0;
-  MotionAC_Update(&data_in, &is_calibrated); // Calculate the compensated gyroscope data
+  // Calculate the compensated accelerometer data
+  MotionAC_Update(&data_in, &is_calibrated);
 
   return is_calibrated;
 }
 
+void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro) {
+	currGyro->x = currGyro->x - gc_data_out.GyroBiasX;
+	currGyro->y = currGyro->y - gc_data_out.GyroBiasY;
+	currGyro->z = currGyro->z - gc_data_out.GyroBiasZ;
+}
+
+/**
+ *  These functions need to be implemented but should not be called; the accelerometer calibration library decides
+	when to call these functions. They may be implemented as empty (always return 0) if saving and loading
+	calibration coefficients is not needed.
+	Currently these functions are implemented as NVM storage is used to store the acceleration calibration value
+	even when the chip is powered OFF.
+	More info: https://www.st.com/resource/en/user_manual/dm00373531-getting-started-with-motionac-accelerometer-calibration-library-in-xcubemems1-expansion-for-stm32cube-stmicroelectronics.pdf
+ */
+char MotionAC_SaveCalInNVM(void *handle, unsigned short int dataSize, unsigned int *data)
+{
+  // Prepend magic number and version
+  uint32_t buffer[dataSize/sizeof(uint32_t) + 2];
+  buffer[0] = MOTIONAC_CAL_MAGIC;
+  buffer[1] = 0x01; // Data format version
+  memcpy(&buffer[2], data, dataSize);
+
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  WRITE_ENABLE(&hm95p32);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  Page_Write(&hm95p32, (uint8_t*)buffer, MOTIONAC_CAL_ADDR, sizeof(buffer));
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
+  return 0;
+}
+
+char MotionAC_LoadCalFromNVM(void *handle, unsigned short int dataSize, unsigned int *data)
+{
+  uint32_t header[2];
+
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  Single_Read(&hm95p32, (uint8_t*)header, MOTIONAC_CAL_ADDR, sizeof(header));
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
+  if(header[0] != MOTIONAC_CAL_MAGIC || header[1] != 0x01) {
+    return 1; // Invalid calibration data
+  }
+
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  Single_Read(&hm95p32, (uint8_t*)data, MOTIONAC_CAL_ADDR + 8, dataSize);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
+  return 0;
+}
+/* USER CODE END MEMS1 */
 
 #ifdef  USE_FULL_ASSERT
 /**
