@@ -71,7 +71,9 @@ MAC_knobs_t ac_knobs;
 MAC_output_t ac_data_out;
 int VERSION_STR_LENG = 35;
 #define MOTIONAC_CAL_MAGIC 0xACCA1B1E
-#define MOTIONAC_CAL_ADDR  0x000100  // Reserved page after init block
+#define MOTIONAC_CAL_ADDR  0x000200  // Reserved page after init block
+#define DEBUG_PAGE_ADDR    0x000400
+#define RUN_DATA_ADDR      0x000600
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -174,7 +176,7 @@ int main(void)
   uint32_t nextTick = uwTick;
   while(!calibrated)
   {
-    if(uwTick > nextTick) // 10ms passed
+    if(uwTick >= nextTick) // 10ms passed
     {
     	nextTick = uwTick + 10;
 		calibrated = CalibrateAccData() && !CalibrateGyroData();
@@ -449,14 +451,14 @@ static void M95p32_Init(void)
   currTarAddr = mem_InitBlock[mem_InitBlock[1]]; //start where previous file ends
   if(currTarAddr == 1) //new file system
   {
-    currTarAddr = 0x000400;
+    currTarAddr = RUN_DATA_ADDR;
   }
   //we do not save in new file count
   //error saving at end of flight results in potential loss of a file
   //if saved now instead, errors would remove formatting page, losing all files
-  currDbgAddr = 0x000200;
+  currDbgAddr = DEBUG_PAGE_ADDR;
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  Page_Erase(&hm95p32, 0x000200);
+  Page_Erase(&hm95p32, DEBUG_PAGE_ADDR);
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 }
 
@@ -655,15 +657,15 @@ void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro) {
  */
 char MotionAC_SaveCalInNVM(void *handle, unsigned short int dataSize, unsigned int *data)
 {
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
+  WRITE_ENABLE(&hm95p32);
+  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
   // Prepend magic number and version
   uint32_t buffer[dataSize/sizeof(uint32_t) + 2];
   buffer[0] = MOTIONAC_CAL_MAGIC;
   buffer[1] = 0x01; // Data format version
   memcpy(&buffer[2], data, dataSize);
-
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  WRITE_ENABLE(&hm95p32);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
   Page_Write(&hm95p32, (uint8_t*)buffer, MOTIONAC_CAL_ADDR, sizeof(buffer));
