@@ -598,18 +598,21 @@ static int CalibrateGyroData(void) {
   // Calculate the compensated gyroscope data
   MotionGC_Update(&data_in, &gc_data_out, &bias_updated);
 
+  printf("Gyro calibration done!\n");
+
   return bias_updated;
 }
 
-void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
-	MAC_output_t data_out;
+void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro) {
+	printf("Gyro before Cal:- X: %d Y: %d Z: %d\n", currGyro->x, currGyro->y, currGyro->z);
 
-	/* Get Calibration coeficients */
-	MotionAC_GetCalParams(&data_out);
 
-	currAcc->x = (currAcc->x - data_out.AccBias[0])* data_out.SF_Matrix[0][0];
-	currAcc->y = (currAcc->y - data_out.AccBias[1])* data_out.SF_Matrix[1][1];
-	currAcc->z = (currAcc->z - data_out.AccBias[2])* data_out.SF_Matrix[2][2];
+	currGyro->x = currGyro->x - gc_data_out.GyroBiasX;
+	currGyro->y = currGyro->y - gc_data_out.GyroBiasY;
+	currGyro->z = currGyro->z - gc_data_out.GyroBiasZ;
+
+	printf("Gyro after Cal:- X: %d Y: %d Z: %d\n", currGyro->x, currGyro->y, currGyro->z);
+
 }
 
 /* Initialize the MotionAC library */
@@ -638,13 +641,26 @@ static uint8_t CalibrateAccData(void) {
   // Calculate the compensated accelerometer data
   MotionAC_Update(&data_in, &is_calibrated);
 
+  printf("Acc cal done!\n");
+
   return is_calibrated;
 }
 
-void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro) {
-	currGyro->x = currGyro->x - gc_data_out.GyroBiasX;
-	currGyro->y = currGyro->y - gc_data_out.GyroBiasY;
-	currGyro->z = currGyro->z - gc_data_out.GyroBiasZ;
+void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
+	MAC_output_t data_out;
+
+	/* Get Calibration coeficients */
+	MotionAC_GetCalParams(&data_out);
+
+	printf("Acc after Cal:- X: %d Y: %d Z: %d\n", currAcc->x, currAcc->y, currAcc->z);
+
+
+	currAcc->x = (currAcc->x - data_out.AccBias[0])* data_out.SF_Matrix[0][0];
+	currAcc->y = (currAcc->y - data_out.AccBias[1])* data_out.SF_Matrix[1][1];
+	currAcc->z = (currAcc->z - data_out.AccBias[2])* data_out.SF_Matrix[2][2];
+
+	printf("Acc before Cal:- X: %d Y: %d Z: %d\n", currAcc->x, currAcc->y, currAcc->z);
+
 }
 
 /**
@@ -670,6 +686,9 @@ char MotionAC_SaveCalInNVM(void *handle, unsigned short int dataSize, unsigned i
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
   Page_Write(&hm95p32, (uint8_t*)buffer, MOTIONAC_CAL_ADDR, sizeof(buffer));
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
+  printf(data);
+  printf("\n");
 
   return 0;
 }
