@@ -29,7 +29,7 @@ extern QSPI_HandleTypeDef QSPI_INSTANCE;
 
 #ifdef USE_SPI
 
-uint8_t CmdBuff[612U] __attribute__ ((aligned (4))); //was 610, increased for data alignment
+uint8_t CmdBuff[SIZE610];
 
 /**
   * @brief  This function polls WIP bit of status register
@@ -477,8 +477,10 @@ int32_t Page_Write(M95_Object_t *pObj, uint8_t *pData, uint32_t TarAddr, uint32_
   CmdBuff[1] = (uint8_t)((targetAddress & MSK_BYTE3) >> SHIFT_16BIT);
   CmdBuff[2] = (uint8_t)((targetAddress & MSK_BYTE2) >> SHIFT_8BIT);
   CmdBuff[3] = (uint8_t)(targetAddress & MSK_BYTE1);
-
-  memcpy(CmdBuff + 4, pData, bytesToWrite);
+  for(uint32_t loop = 0; loop < bytesToWrite; loop++)
+  {
+    CmdBuff[loop + 4U] = pData [loop];
+  }   
   
   status = pObj->IO.Write(CmdBuff, bytesToWrite + INSTRUCTION_LEN_4_BYTE);
   memset(&CmdBuff, 0, sizeof(CmdBuff));

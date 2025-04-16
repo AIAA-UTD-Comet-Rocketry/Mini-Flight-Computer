@@ -47,6 +47,7 @@ uint16_t IMU_PIN = IMU_CS_Pin;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+CRC_HandleTypeDef hcrc;
 
 /* USER CODE BEGIN PV */
 extern __IO uint32_t uwTick;
@@ -79,6 +80,7 @@ int VERSION_STR_LENG = 35;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
 static void Lps22_Init(void);
 static void Lsm6D_Init(void);
@@ -156,6 +158,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_CRC_Init();
   /* USER CODE BEGIN 2 */
   BSP_SPI1_Init();
   Lps22_Init();
@@ -164,27 +167,26 @@ int main(void)
   initFlightState(&fs);
   MotionGC_Init();
   MotionAC_Init();
-  /* USER CODE END 2 */
 
   uint8_t dataFlag = 0;
   uint8_t memFlag = 0;
 
   temocTests(); // Compile option test programs
 
-  /* USER CODE BEGIN calibrate */
   bool calibrated = false;
   uint32_t nextTick = uwTick;
   while(!calibrated)
   {
-    if(uwTick >= nextTick) // 10ms passed
-    {
-    	nextTick = uwTick + 10;
-		calibrated = CalibrateAccData() && !CalibrateGyroData();
-    }
+	  if(uwTick >= nextTick) // 10ms passed
+	  {
+		  nextTick = uwTick + 10;
+		  calibrated = CalibrateGyroData() && CalibrateAccData();
+	  }
   }
   /* USER CODE END calibrate */
 
   HAL_Delay(10000); //10 sec for save interrupt
+  /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -195,7 +197,7 @@ int main(void)
     //LSM6DSR_ACC_Get_DRDY_Status(&hlsm6d, &dataFlag);
     if(dataFlag != 0)
     {
-		//get pressure data
+		//get sensor data
 		LPS22HH_PRESS_GetPressure(&hlps22, &nextFrame.currPress);
 		LPS22HH_TEMP_GetTemperature(&hlps22, &nextFrame.currTemp);
 
@@ -298,6 +300,32 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
+
 }
 
 /**
@@ -555,24 +583,7 @@ int _write(int le, char *ptr, int len)
 	}
 	return len;
 }
-/* USER CODE END 4 */
 
-/**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
-  /* USER CODE END Error_Handler_Debug */
-}
-
-/* USER CODE BEGIN MEMS1 */
 /* Initialize the MotionGC library */
 static void MotionGC_Init(void) {
 	MotionGC_Initialize(mcu_type, &sample_freq); // Initialize with sample frequency
@@ -581,6 +592,7 @@ static void MotionGC_Init(void) {
 /* Calibrate gyroscope sensor (LSM6DSR) */
 static int CalibrateGyroData(void) {
   MGC_input_t data_in;
+  MGC_output_t data_out;
   LSM6DSR_Axes_t gyro_data;
   LSM6DSR_Axes_t acc_data;
   LSM6DSR_ACC_GetAxes(&hlsm6d, &acc_data);
@@ -596,9 +608,13 @@ static int CalibrateGyroData(void) {
 
   int bias_updated = 1;
   // Calculate the compensated gyroscope data
-  MotionGC_Update(&data_in, &gc_data_out, &bias_updated);
+  MotionGC_Update(&data_in, &data_out, &bias_updated);
 
-  printf("Gyro calibration done!\n");
+  printf("Gyro offset:- X: %d Y: %d Z: %d\n", data_out.GyroBiasX, data_out.GyroBiasY, data_out.GyroBiasZ);
+
+  if (bias_updated) {
+	  printf("Gyro calibration done!\n");
+  }
 
   return bias_updated;
 }
@@ -641,7 +657,14 @@ static uint8_t CalibrateAccData(void) {
   // Calculate the compensated accelerometer data
   MotionAC_Update(&data_in, &is_calibrated);
 
-  printf("Acc cal done!\n");
+  MotionAC_GetCalParams(&ac_data_out);
+  MotionAC_GetKnobs(&ac_knobs);
+  printf("Acc offset:- X: %d Y: %d Z: %d\n", ac_data_out.AccBias[0], ac_data_out.AccBias[1], ac_data_out.AccBias[2]);
+  printf("Knobs: %d\n", ac_knobs);
+
+  if (is_calibrated) {
+	  printf("Acc cal done!!\n");
+  }
 
   return is_calibrated;
 }
@@ -687,8 +710,7 @@ char MotionAC_SaveCalInNVM(void *handle, unsigned short int dataSize, unsigned i
   Page_Write(&hm95p32, (uint8_t*)buffer, MOTIONAC_CAL_ADDR, sizeof(buffer));
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
-  printf(data);
-  printf("\n");
+  printf("Acc coef in NVM: %d\n", data);
 
   return 0;
 }
@@ -711,7 +733,22 @@ char MotionAC_LoadCalFromNVM(void *handle, unsigned short int dataSize, unsigned
 
   return 0;
 }
-/* USER CODE END MEMS1 */
+/* USER CODE END 4 */
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
 
 #ifdef  USE_FULL_ASSERT
 /**
