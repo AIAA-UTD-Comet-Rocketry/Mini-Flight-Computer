@@ -783,10 +783,10 @@ void ProcessSensorData(LSM6DSR_Axes_t currGyro, LSM6DSR_Axes_t currAcc) {
 	MotionFX_update(mfx_state, &motion_output, &motion_input, &deltaTime, NULL); //corrective
 
 	// Store formatted outputs
-	nextFrame.roll = motion_output.rotation_6X[0];
-	nextFrame.pitch = motion_output.rotation_6X[1];
-	nextFrame.yaw = motion_output.rotation_6X[2];
-	memcpy(nextFrame.linAcc, motion_output.linAcc, sizeof(float)*3);
+	nextFrame.roll = motion_output.rotation[0];
+	nextFrame.pitch = motion_output.rotation[1];
+	nextFrame.yaw = motion_output.rotation[2];
+	memcpy(nextFrame.linAcc, motion_output.linear_acceleration, sizeof(float)*3);
 	memcpy(nextFrame.gravity, motion_output.gravity, sizeof(float)*3);
 }
 
