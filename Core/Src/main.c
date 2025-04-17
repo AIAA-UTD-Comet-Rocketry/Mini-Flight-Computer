@@ -37,7 +37,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define MOTIONAC_CAL_MAGIC 0xACCA1B1E
+#define MOTIONAC_CAL_ADDR  0x000200  // Reserved page after init block
+#define DEBUG_PAGE_ADDR    0x000400
+#define RUN_DATA_ADDR      0x000600
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -64,17 +67,15 @@ float gTotalAcc;
 float gDegOffVert;
 
 /* MotionGC/AC variables */
+int VERSION_STR_LENG = 35;
 MGC_mcu_type_t mcu_type = MGC_MCU_STM32;
+float sample_freq = 100.0f; // 100hz
 MGC_knobs_t gc_knobs;
 MGC_output_t gc_data_out;
-float sample_freq = 100.0f; // 100hz
 MAC_knobs_t ac_knobs;
 MAC_output_t ac_data_out;
-int VERSION_STR_LENG = 35;
-#define MOTIONAC_CAL_MAGIC 0xACCA1B1E
-#define MOTIONAC_CAL_ADDR  0x000200  // Reserved page after init block
-#define DEBUG_PAGE_ADDR    0x000400
-#define RUN_DATA_ADDR      0x000600
+int counter = 0;
+uint8_t calibration_loaded = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -99,6 +100,8 @@ static void MotionAC_Init(void);
 static uint8_t CalibrateAccData(void);
 static void ApplyAccCalibration(LSM6DSR_Axes_t *);
 
+char MotionAC_LoadCalFromNVM(unsigned short int dataSize, unsigned int *data);
+char MotionAC_SaveCalInNVM(unsigned short int dataSize, unsigned int *data);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -168,6 +171,18 @@ int main(void)
   MotionGC_Init();
   MotionAC_Init();
 
+//  MAC_output_t loaded_cal;
+//  uint8_t calibration_loaded = 0;
+//
+//  // Attempt to load existing calibration
+//  if(MotionAC_LoadCalFromNVM(sizeof(MAC_output_t), (unsigned int*)&loaded_cal) == 0) {
+//      calibration_loaded = 1;
+//      printf("Loaded existing calibration from NVM\n");
+//  }
+//  else {
+//	  printf("Failed to find/load any existing calibration from NVM\n");
+//  }
+
   uint8_t dataFlag = 0;
   uint8_t memFlag = 0;
 
@@ -180,9 +195,20 @@ int main(void)
 	  if(uwTick >= nextTick) // 10ms passed
 	  {
 		  nextTick = uwTick + 10;
-		  calibrated = CalibrateGyroData() && CalibrateAccData();
+		  calibrated = CalibrateGyroData();
 	  }
   }
+
+  calibrated = false;
+  nextTick = uwTick;
+    while(!calibrated || calibration_loaded)
+    {
+  	  if(uwTick >= nextTick) // 10ms passed
+  	  {
+  		  nextTick = uwTick + 10;
+  		  calibrated = CalibrateAccData();
+  	  }
+    }
   /* USER CODE END calibrate */
 
   HAL_Delay(10000); //10 sec for save interrupt
@@ -592,7 +618,6 @@ static void MotionGC_Init(void) {
 /* Calibrate gyroscope sensor (LSM6DSR) */
 static int CalibrateGyroData(void) {
   MGC_input_t data_in;
-  MGC_output_t data_out;
   LSM6DSR_Axes_t gyro_data;
   LSM6DSR_Axes_t acc_data;
   LSM6DSR_ACC_GetAxes(&hlsm6d, &acc_data);
@@ -608,12 +633,11 @@ static int CalibrateGyroData(void) {
 
   int bias_updated = 1;
   // Calculate the compensated gyroscope data
-  MotionGC_Update(&data_in, &data_out, &bias_updated);
-
-  printf("Gyro offset:- X: %d Y: %d Z: %d\n", data_out.GyroBiasX, data_out.GyroBiasY, data_out.GyroBiasZ);
+  MotionGC_Update(&data_in, &gc_data_out, &bias_updated);
 
   if (bias_updated) {
 	  printf("Gyro calibration done!\n");
+	  printf("Gyro offset:- X: %d Y: %d Z: %d\n", (int)(gc_data_out.GyroBiasX*1000), (int)(gc_data_out.GyroBiasY*1000), (int)(gc_data_out.GyroBiasZ*1000));
   }
 
   return bias_updated;
@@ -627,7 +651,7 @@ void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro) {
 	currGyro->y = currGyro->y - gc_data_out.GyroBiasY;
 	currGyro->z = currGyro->z - gc_data_out.GyroBiasZ;
 
-	printf("Gyro after Cal:- X: %d Y: %d Z: %d\n", currGyro->x, currGyro->y, currGyro->z);
+	printf("Gyro after Cal:- X: %d Y: %d Z: %d\n\n", currGyro->x, currGyro->y, currGyro->z);
 
 }
 
@@ -636,7 +660,11 @@ static void MotionAC_Init(void) {
 	MotionAC_Initialize(true); // Initialize with sample frequency
 	MotionAC_GetKnobs(&ac_knobs);
 
-	ac_knobs.Sample_ms = 1;
+	//ac_knobs.Sample_ms = 1;
+	// Configure for 6-point calibration
+	ac_knobs.Run6PointCal = 1;       // Enable 6-point calibration
+	ac_knobs.Sample_ms = 10;         // Match your 100Hz sensor ODR
+	ac_knobs.MoveThresh_g = 0.15f;   // Critical for detecting stillness
 
 	MotionAC_SetKnobs(&ac_knobs);
 }
@@ -651,19 +679,37 @@ static uint8_t CalibrateAccData(void) {
   data_in.Acc[0]  = ((float)acc_data.x)/1000.0;
   data_in.Acc[1]  = ((float)acc_data.y)/1000.0;
   data_in.Acc[2]  = ((float)acc_data.z)/1000.0;
-  data_in.TimeStamp = uwTick;
+  data_in.TimeStamp = HAL_GetTick(); // Use direct timestamp
 
   uint8_t is_calibrated = 0;
   // Calculate the compensated accelerometer data
   MotionAC_Update(&data_in, &is_calibrated);
 
   MotionAC_GetCalParams(&ac_data_out);
-  MotionAC_GetKnobs(&ac_knobs);
-  printf("Acc offset:- X: %d Y: %d Z: %d\n", ac_data_out.AccBias[0], ac_data_out.AccBias[1], ac_data_out.AccBias[2]);
-  printf("Knobs: %d\n", ac_knobs);
+
+  if (counter++ % 100 == 0) {
+	  printf("Time: %d ", counter);
+	  int status = ac_data_out.CalQuality;
+	  switch(status) {
+	  	  case 1:
+			printf("MAC_CALQSTATUS: POOR\n");
+			break;
+	  	case 2:
+			printf("MAC_CALQSTATUS: OK\n");
+			break;
+	  	case 3:
+			printf("MAC_CALQSTATUS: GOOD!!!!!\n");
+			break;
+	  	default:
+	  		printf("MAC_CALQSTATUS: UNKNOWN!\n");
+	  }
+	  //printf("Status: %d\n", ac_data_out.CalQuality);
+	  printf("Acc Bias:- X: %d Y: %d Z: %d\n", ac_data_out.AccBias[0]*1000, ac_data_out.AccBias[1]*1000, ac_data_out.AccBias[2]*1000);
+  }
 
   if (is_calibrated) {
 	  printf("Acc cal done!!\n");
+	  printf("Cal Q: %d | Acc Bias:- X: %d Y: %d Z: %d\n", ac_data_out.CalQuality, ac_data_out.AccBias[0]*1000, ac_data_out.AccBias[1]*1000, ac_data_out.AccBias[2]*1000);
   }
 
   return is_calibrated;
@@ -677,12 +723,11 @@ void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
 
 	printf("Acc after Cal:- X: %d Y: %d Z: %d\n", currAcc->x, currAcc->y, currAcc->z);
 
-
 	currAcc->x = (currAcc->x - data_out.AccBias[0])* data_out.SF_Matrix[0][0];
 	currAcc->y = (currAcc->y - data_out.AccBias[1])* data_out.SF_Matrix[1][1];
 	currAcc->z = (currAcc->z - data_out.AccBias[2])* data_out.SF_Matrix[2][2];
 
-	printf("Acc before Cal:- X: %d Y: %d Z: %d\n", currAcc->x, currAcc->y, currAcc->z);
+	printf("Acc before Cal:- X: %d Y: %d Z: %d\n\n", currAcc->x, currAcc->y, currAcc->z);
 
 }
 
@@ -694,7 +739,7 @@ void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
 	even when the chip is powered OFF.
 	More info: https://www.st.com/resource/en/user_manual/dm00373531-getting-started-with-motionac-accelerometer-calibration-library-in-xcubemems1-expansion-for-stm32cube-stmicroelectronics.pdf
  */
-char MotionAC_SaveCalInNVM(void *handle, unsigned short int dataSize, unsigned int *data)
+char MotionAC_SaveCalInNVM(unsigned short int dataSize, unsigned int *data)
 {
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
   WRITE_ENABLE(&hm95p32);
@@ -715,7 +760,7 @@ char MotionAC_SaveCalInNVM(void *handle, unsigned short int dataSize, unsigned i
   return 0;
 }
 
-char MotionAC_LoadCalFromNVM(void *handle, unsigned short int dataSize, unsigned int *data)
+char MotionAC_LoadCalFromNVM(unsigned short int dataSize, unsigned int *data)
 {
   uint32_t header[2];
 
@@ -730,6 +775,8 @@ char MotionAC_LoadCalFromNVM(void *handle, unsigned short int dataSize, unsigned
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
   Single_Read(&hm95p32, (uint8_t*)data, MOTIONAC_CAL_ADDR + 8, dataSize);
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+
+  uint8_t calibration_loaded = 1;
 
   return 0;
 }
