@@ -76,7 +76,6 @@ MGC_knobs_t gc_knobs;
 MGC_output_t gc_data_out;
 MAC_knobs_t ac_knobs;
 MAC_output_t ac_data_out;
-int counter = 0;
 uint8_t calibration_loaded = 0;
 
 /* MotionFX */
@@ -181,18 +180,6 @@ int main(void)
   MotionAC_Init();
   MotionFX_Init();
 
-//  MAC_output_t loaded_cal;
-//  uint8_t calibration_loaded = 0;
-//
-//  // Attempt to load existing calibration
-//  if(MotionAC_LoadCalFromNVM(sizeof(MAC_output_t), (unsigned int*)&loaded_cal) == 0) {
-//      calibration_loaded = 1;
-//      printf("Loaded existing calibration from NVM\n");
-//  }
-//  else {
-//	  printf("Failed to find/load any existing calibration from NVM\n");
-//  }
-
   uint8_t dataFlag = 0;
   uint8_t memFlag = 0;
 
@@ -211,7 +198,8 @@ int main(void)
 
   calibrated = false;
   nextTick = uwTick;
-    while(!calibrated || !calibration_loaded)
+  printf("calibration loaded: %d\n", calibration_loaded);
+    while(calibrated)
     {
   	  if(uwTick >= nextTick) // 10ms passed
   	  {
@@ -221,7 +209,7 @@ int main(void)
     }
   /* USER CODE END calibrate */
 
-  HAL_Delay(10000); //10 sec for save interrupt
+  HAL_Delay(1000); //10 sec for save interrupt
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -241,13 +229,13 @@ int main(void)
 		LSM6DSR_ACC_GetAxes(&hlsm6d, &nextFrame.currAcc);
 
 		//apply calibration bias to raw values:
-		ApplyGyroCalibration(&nextFrame.currGyro);
-		ApplyAccCalibration(&nextFrame.currAcc);
+		//ApplyGyroCalibration(&nextFrame.currGyro);
+		//ApplyAccCalibration(&nextFrame.currAcc);
 
 		ProcessSensorData(nextFrame.currGyro, nextFrame.currAcc);
     }
 
-    updateState(&fs);
+    //updateState(&fs);
 
 
     if(uwTick >= nextTick)
@@ -622,10 +610,12 @@ int _write(int le, char *ptr, int len)
 	return len;
 }
 
+
 /* Initialize the MotionGC library */
 static void MotionGC_Init(void) {
 	MotionGC_Initialize(mcu_type, &sample_freq); // Initialize with sample frequency
 }
+
 
 /* Calibrate gyroscope sensor (LSM6DSR) */
 static int CalibrateGyroData(void) {
@@ -636,12 +626,12 @@ static int CalibrateGyroData(void) {
   LSM6DSR_GYRO_GetAxes(&hlsm6d, &gyro_data); // Get angular rate from LSM6DSR
 
   // data cast and copy - mdps -> dps & mg -> g
-  data_in.Acc[0]  = ((float)acc_data.x)/1000.0;
-  data_in.Acc[1]  = ((float)acc_data.y)/1000.0;
-  data_in.Acc[2]  = ((float)acc_data.z)/1000.0;
-  data_in.Gyro[0] = ((float)gyro_data.x)/1000.0;
-  data_in.Gyro[1] = ((float)gyro_data.y)/1000.0;
-  data_in.Gyro[2] = ((float)gyro_data.z)/1000.0;
+  data_in.Acc[0]  = ((float)acc_data.x)/1000.0f;
+  data_in.Acc[1]  = ((float)acc_data.y)/1000.0f;
+  data_in.Acc[2]  = ((float)acc_data.z)/1000.0f;
+  data_in.Gyro[0] = ((float)gyro_data.x)/1000.0f;
+  data_in.Gyro[1] = ((float)gyro_data.y)/1000.0f;
+  data_in.Gyro[2] = ((float)gyro_data.z)/1000.0f;
 
   int bias_updated = 1;
   // Calculate the compensated gyroscope data
@@ -655,17 +645,26 @@ static int CalibrateGyroData(void) {
   return bias_updated;
 }
 
+
+/* Main loop for filtering  */
 void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro) {
-	printf("Gyro before Cal:- X: %d Y: %d Z: %d\n", currGyro->x, currGyro->y, currGyro->z);
+	static uint32_t gccounter = 0;
 
+	if(!(++gccounter%1000)){
+		//printf("Gyro before Cal mdps:- X: %d Y: %d Z: %d\n", (int)currGyro->x, (int)currGyro->y, (int)currGyro->z);
+		printf("Gyro before Cal mdps:- X: Y: Z: \n");
+	}
 
-	currGyro->x = currGyro->x - gc_data_out.GyroBiasX;
-	currGyro->y = currGyro->y - gc_data_out.GyroBiasY;
-	currGyro->z = currGyro->z - gc_data_out.GyroBiasZ;
+	currGyro->x = currGyro->x - (int)(gc_data_out.GyroBiasX*1000);
+	currGyro->y = currGyro->y - (int)(gc_data_out.GyroBiasY*1000);
+	currGyro->z = currGyro->z - (int)(gc_data_out.GyroBiasZ*1000);
 
-	printf("Gyro after Cal:- X: %d Y: %d Z: %d\n\n", currGyro->x, currGyro->y, currGyro->z);
-
+	if(!(gccounter%1000)) {
+		//printf("Gyro after Cal mdps:- X: %d Y: %d Z: %d\n\n", (int)currGyro->x, (int)currGyro->y, (int)currGyro->z);
+		printf("Gyro after Cal mdps:- X: Y: Z:\n\n");
+	}
 }
+
 
 /* Initialize the MotionAC library */
 static void MotionAC_Init(void) {
@@ -681,6 +680,7 @@ static void MotionAC_Init(void) {
 	MotionAC_SetKnobs(&ac_knobs);
 }
 
+
 /* Calibrate accelerometer sensor (LSM6DSR)*/
 static uint8_t CalibrateAccData(void) {
   MAC_input_t data_in;
@@ -688,9 +688,9 @@ static uint8_t CalibrateAccData(void) {
   LSM6DSR_ACC_GetAxes(&hlsm6d, &acc_data);
 
   // data cast and copy - mdps -> dps & mg -> g
-  data_in.Acc[0]  = ((float)acc_data.x)/1000.0;
-  data_in.Acc[1]  = ((float)acc_data.y)/1000.0;
-  data_in.Acc[2]  = ((float)acc_data.z)/1000.0;
+  data_in.Acc[0]  = ((float)acc_data.x)/1000.0f;
+  data_in.Acc[1]  = ((float)acc_data.y)/1000.0f;
+  data_in.Acc[2]  = ((float)acc_data.z)/1000.0f;
   data_in.TimeStamp = HAL_GetTick(); // Use direct timestamp
 
   uint8_t is_calibrated = 0;
@@ -699,6 +699,7 @@ static uint8_t CalibrateAccData(void) {
 
   MotionAC_GetCalParams(&ac_data_out);
 
+  static uint8_t counter = 0;
   if (counter++ % 100 == 0) {
 	  printf("Time: %d ", counter);
 	  int status = ac_data_out.CalQuality;
@@ -716,30 +717,41 @@ static uint8_t CalibrateAccData(void) {
 	  		printf("MAC_CALQSTATUS: UNKNOWN!\n");
 	  }
 	  //printf("Status: %d\n", ac_data_out.CalQuality);
-	  printf("Acc Bias:- X: %d Y: %d Z: %d\n", ac_data_out.AccBias[0]*1000, ac_data_out.AccBias[1]*1000, ac_data_out.AccBias[2]*1000);
+	  printf("Acc Bias:- X: %d Y: %d Z: %d\n", (int)(ac_data_out.AccBias[0]*1000), (int)(ac_data_out.AccBias[1]*1000), (int)(ac_data_out.AccBias[2]*1000));
   }
 
   if (is_calibrated) {
 	  printf("Acc cal done!!\n");
-	  printf("Cal Q: %d | Acc Bias:- X: %d Y: %d Z: %d\n", ac_data_out.CalQuality, ac_data_out.AccBias[0]*1000, ac_data_out.AccBias[1]*1000, ac_data_out.AccBias[2]*1000);
+	  printf("Cal Q: %d | Acc Bias:- X: %d Y: %d Z: %d\n", (int)ac_data_out.CalQuality, (int)(ac_data_out.AccBias[0]*1000), (int)(ac_data_out.AccBias[1]*1000), (int)(ac_data_out.AccBias[2]*1000));
   }
 
   return is_calibrated;
 }
 
+
+/* Main loop for filtering  */
 void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
 	MAC_output_t data_out;
 
 	/* Get Calibration coeficients */
 	MotionAC_GetCalParams(&data_out);
 
-	printf("Acc after Cal:- X: %d Y: %d Z: %d\n", currAcc->x, currAcc->y, currAcc->z);
+	static uint32_t accounter = 0;
 
-	currAcc->x = (currAcc->x - data_out.AccBias[0])* data_out.SF_Matrix[0][0];
-	currAcc->y = (currAcc->y - data_out.AccBias[1])* data_out.SF_Matrix[1][1];
-	currAcc->z = (currAcc->z - data_out.AccBias[2])* data_out.SF_Matrix[2][2];
+	if(!(++accounter%1000)) {
+		//printf("Acc after Cal:- X: %d Y: %d Z: %d\n", currAcc->x, currAcc->y, currAcc->z);
+		printf("Acc after Cal:- X: Y: Z: \n");
+	}
 
-	printf("Acc before Cal:- X: %d Y: %d Z: %d\n\n", currAcc->x, currAcc->y, currAcc->z);
+	//int-mg        int-mg           fl-g                   fl-g
+	currAcc->x = (currAcc->x - (int32_t)(data_out.AccBias[0]*1000)) * data_out.SF_Matrix[0][0];
+	currAcc->y = (currAcc->y - (int32_t)(data_out.AccBias[1]*1000)) * data_out.SF_Matrix[1][1];
+	currAcc->z = (currAcc->z - (int32_t)(data_out.AccBias[2]*1000)) * data_out.SF_Matrix[2][2];
+
+	if(!(accounter%1000)) {
+		//printf("Acc before Cal:- X: %d Y: %d Z: %d\n\n", currAcc->x, currAcc->y, currAcc->z);
+		printf("Acc before Cal:- X: Y: Z:\n\n");
+	}
 
 }
 
@@ -788,6 +800,17 @@ void ProcessSensorData(LSM6DSR_Axes_t currGyro, LSM6DSR_Axes_t currAcc) {
 	nextFrame.yaw = motion_output.rotation[2];
 	memcpy(nextFrame.linAcc, motion_output.linear_acceleration, sizeof(float)*3);
 	memcpy(nextFrame.gravity, motion_output.gravity, sizeof(float)*3);
+
+	static uint32_t fxcounter = 0;
+
+//	if((fxcounter++ % 100 == 0)) {
+		printf("Roll: %d deg\n", (int)nextFrame.roll);
+		printf("Pitch: %d deg\n", (int)nextFrame.pitch);
+		printf("Yaw: %d deg\n", (int)nextFrame.yaw);
+		printf("X_Gravity: %f g\n", nextFrame.gravity[0]);
+		printf("Y_Gravity: %f g\n", nextFrame.gravity[1]);
+		printf("Z_Gravity: %f g\n\n", nextFrame.gravity[2]);
+//	}
 }
 
 /**
@@ -814,7 +837,7 @@ char MotionAC_SaveCalInNVM(unsigned short int dataSize, unsigned int *data)
   Page_Write(&hm95p32, (uint8_t*)buffer, MOTIONAC_CAL_ADDR, sizeof(buffer));
   HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
-  printf("Acc coef in NVM: %d\n", data);
+  //printf("Acc coef in NVM: %d\n", data);
 
   return 0;
 }
