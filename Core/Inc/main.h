@@ -31,12 +31,27 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "lps22hh.h"
+#include "lsm6dsr.h"
+#include "m95p32.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-
+typedef struct
+{
+	float 			currPress; 	   // hPa
+	float			currTemp; 	   // °C
+	LSM6DSR_Axes_t	currAcc; 	   // mg
+	LSM6DSR_Axes_t	currGyro; 	   // mdps
+	uint32_t        currTick;      // ms
+	float           roll;          // °
+	float           pitch;         // °
+	float           yaw;           // °
+	float           linAcc[3];     // g (X,Y,Z)
+	float           gravity[3];    // g vector
+	float			altitude;      // feet
+} dataframe_t;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
@@ -53,7 +68,8 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+void M95p32_Reformat(void);
+void M95p32_DebugPrint(uint8_t*, uint32_t size);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
