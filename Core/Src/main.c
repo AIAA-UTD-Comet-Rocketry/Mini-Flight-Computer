@@ -24,7 +24,7 @@
 #include "custom_bus.h"
 #include "FlightState.h"
 #include "sensor_filter_ops.h"
-#include <stdlib.h> // For malloc/free
+#include "memops_ex.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,11 +34,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MOTIONAC_CAL_MAGIC	0xACCA1B1E
-
-#define MOTIONAC_CAL_ADDR  0x000200  // Reserved page after init block
-#define DEBUG_PAGE_ADDR    0x000400
-#define RUN_DATA_ADDR      0x000600
 
 /* USER CODE END PD */
 
@@ -56,14 +51,9 @@ extern __IO uint32_t uwTick;
 extern SPI_HandleTypeDef hspi1;
 LPS22HH_Object_t hlps22; //pressure + barometer
 LSM6DSR_Object_t hlsm6d; //acc + gyro
-M95_Object_t     hm95p32;
-FlightState      fs = {0};
-volatile uint32_t currTarAddr;
-volatile uint32_t currDbgAddr;
+FlightState      fs;
 
-float gAltitude;
-float gTotalAcc;
-float gDegOffVert;
+float gAltitude, gTotalAcc, gDegOffVert;
 
 /* USER CODE END PV */
 
@@ -74,22 +64,15 @@ static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
 static void Lps22_Init(void);
 static void Lsm6D_Init(void);
-static void M95p32_Init(void);
-static void M95p32_Close(void);
 
 extern void temocTests();
-
-uint8_t MotionAC_LoadCalFromNVM(uint16_t dataSize, uint32_t *data);
-uint8_t MotionAC_SaveCalInNVM(uint16_t dataSize, uint32_t *data);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 dataframe_t nextFrame __attribute__((aligned (4))); //aligned for faster data transfer
 dataframe_t stagedMem[14] __attribute__((aligned (4)));
-uint32_t mem_InitBlock[128] __attribute__((aligned (4))); //512 bytes
 uint8_t memIndex = 0;
-volatile uint8_t debugSector = 0;
 uint8_t sector[4096] __attribute__((aligned (4))) = {0};
 
 typedef struct {
@@ -235,16 +218,10 @@ int main(void)
     {
       memFlag = 0;
       //block is ready to be stored
-      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-      WRITE_ENABLE(&hm95p32);
-      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
 
-      //this takes 0.5ms at minimum, can caused missed sensor cycle each 700msec
-      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-      Page_Write(&hm95p32, (uint8_t*)stagedMem, currTarAddr, sizeof(stagedMem));
-      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-      currTarAddr += 0x200; //move address to next page
-      if(currTarAddr >= 0x400000) {
+      uint32_t ret = M95p32_SavePage((uint8_t*)stagedMem, sizeof(stagedMem));
+
+      if(ret) {
         // max data size reached
         __disable_irq();
         while(1)
@@ -438,120 +415,6 @@ static void Lsm6D_Init(void)
   LSM6DSR_GYRO_SetFullScale(&hlsm6d, 250U); //changed from 2000 to 250
 }
 
-static void M95p32_Init(void)
-{
- /*
-  * Memory Architecture:
-  * - 4 194 304 bytes
-  * - 512 bytes per page
-  * - 8 pages per sector
-  * - 16 sectors per block
-  * - 64 blocks total
-  *
-  * Erase operations must stay within a block, sector, or page
-  * Write operations must stay within the page, a new call is needed to span a boundary
-  * Reads are unlimited
-  *
-  * page 0 (0x000 - 0x1FF) stores init data and file locations
-  * pages 1 and up contain 1 stagedMem array per page, with file boundaries defined in page 0
-  *
-  */
-
-  hm95p32.IO.Init = (M95_Init_Func)BSP_SPI1_Init;
-  hm95p32.IO.DeInit = (M95_DeInit_Func)BSP_SPI1_DeInit;
-  hm95p32.IO.Delay = (M95_Delay)HAL_Delay;
-  hm95p32.IO.Read = BSP_SPI1_Recv;
-  hm95p32.IO.Write = BSP_SPI1_Send;
-
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  WRITE_ENABLE(&hm95p32);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-
-  memset(mem_InitBlock, 0, 512U);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  Single_Read(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U); //get page with init data
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-
-  if(mem_InitBlock[0] != 0xa5a5a5a5)
-  {
-    //the eeprom has not been formatted
-    M95p32_Reformat();
-  }
-
-  mem_InitBlock[1] += 1; //start another file
-  currTarAddr = mem_InitBlock[mem_InitBlock[1]]; //start where previous file ends
-  if(currTarAddr == 1) //new file system
-  {
-    currTarAddr = RUN_DATA_ADDR;
-  }
-  //we do not save in new file count
-  //error saving at end of flight results in potential loss of a file
-  //if saved now instead, errors would remove formatting page, losing all files
-  currDbgAddr = DEBUG_PAGE_ADDR;
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  Page_Erase(&hm95p32, DEBUG_PAGE_ADDR);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-}
-
-void M95p32_Reformat(void)
-{
-	/*
-	 * 512 page 0 format:
-	 * *-------*--------------*
-	 * | bytes | description  |
-	 * *-------*--------------*
-	 * |  0-3  | format ID    |
-	 * *-------*--------------*
-	 * |  4-7  |# Files(0-126)|
-	 * *-------*--------------*
-	 * |   8   | File 2 start |
-	 * |   *   |      *       |
-	 * |   *   |      *       |
-	 * |   *   |      *       |
-	 * |  508  |File 127 start|
-	 * *-------*--------------*
-	 *
-	 *	file count held in bytes 4-7 only needs 1 byte, the MSB 3 are reserved for alignment
-	 *
-	 *	file 1 always starts at 0x000200
-	 *	if there are n files, mem_InitBlock[n+1] holds the address for file n+1
-	 */
-
-	memset(mem_InitBlock, 0, 512U);
-	mem_InitBlock[0] = 0xa5a5a5a5;
-
-	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-	Page_Write(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U); //get page with init data
-	HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-}
-
-static void M95p32_Close(void)
-{
-  //saves end of file telling next file where to start
-  mem_InitBlock[mem_InitBlock[1] + 1] = currTarAddr;
-
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  WRITE_ENABLE(&hm95p32);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-  __NOP();
-  __NOP();
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  Page_Write(&hm95p32, (uint8_t*)mem_InitBlock, 0x000000, 512U);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-}
-
-void M95p32_DebugPrint(uint8_t* data, uint32_t size)
-{
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  WRITE_ENABLE(&hm95p32);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-  __NOP();
-  __NOP();
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  Page_Prog(&hm95p32, data, currDbgAddr, size);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-  currDbgAddr += size;
-}
 
 /**
   * @brief  EXTI line detection callbacks.
@@ -563,74 +426,22 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   if(GPIO_Pin == USERSENSE_Pin)
   {
     __disable_irq();
-    currTarAddr = 0x000000;
     while (1) {
-      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-      Single_Read(&hm95p32, sector, currTarAddr, 4096U); //get page with init data
-      HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
+      M95p32_DebugSectorDump((uint8_t*)sector, 0U);
+      (void)sector;
     }
-  //debugSector = 1;
   }
-}
-
-
-/**
- *  These functions need to be implemented but should not be called; the accelerometer calibration library decides
-	when to call these functions. They may be implemented as empty (always return 0) if saving and loading
-	calibration coefficients is not needed.
-	Currently these functions are implemented as NVM storage is used to store the acceleration calibration value
-	even when the chip is powered OFF.
-	More info: https://www.st.com/resource/en/user_manual/dm00373531-getting-started-with-motionac-accelerometer-calibration-library-in-xcubemems1-expansion-for-stm32cube-stmicroelectronics.pdf
- */
-uint8_t MotionAC_SaveCalInNVM(uint16_t dataSize, uint32_t *data)
-{
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  WRITE_ENABLE(&hm95p32);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-
-  // Prepend magic number and version
-  uint32_t buffer[dataSize/sizeof(uint32_t) + 2];
-  buffer[0] = MOTIONAC_CAL_MAGIC;
-  buffer[1] = 0x01; // Data format version
-  memcpy(&buffer[2], data, dataSize);
-
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  Page_Write(&hm95p32, (uint8_t*)buffer, MOTIONAC_CAL_ADDR, sizeof(buffer));
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-
-  //printf("Acc coef in NVM: %d\n", data);
-
-  return 0;
-}
-
-uint8_t MotionAC_LoadCalFromNVM(uint16_t dataSize, uint32_t *data)
-{
-  uint32_t header[2];
-
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  Single_Read(&hm95p32, (uint8_t*)header, MOTIONAC_CAL_ADDR, sizeof(header));
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-
-  if(header[0] != MOTIONAC_CAL_MAGIC || header[1] != 0x01) {
-    return 1; // Invalid calibration data
-  }
-
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_RESET);
-  Single_Read(&hm95p32, (uint8_t*)data, MOTIONAC_CAL_ADDR + 8, dataSize);
-  HAL_GPIO_WritePin(GPIOA, EEPROM_CS_Pin, GPIO_PIN_SET);
-
-  return 0;
 }
 
 
 int _write(int le, char *ptr, int len)
 {
-	int DataIdx;
-	for(DataIdx = 0; DataIdx < len; DataIdx++)
-	{
-		ITM_SendChar(*ptr++);
-	}
-	return len;
+  int DataIdx;
+  for(DataIdx = 0; DataIdx < len; DataIdx++)
+  {
+    ITM_SendChar(*ptr++);
+  }
+  return len;
 }
 /* USER CODE END 4 */
 

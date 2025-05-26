@@ -1,7 +1,5 @@
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
 #include "sensor_filter_ops.h"
 
 extern uint8_t MotionAC_SaveCalInNVM(uint16_t, uint32_t *);

@@ -31,9 +31,11 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdlib.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include "lps22hh.h"
 #include "lsm6dsr.h"
-#include "m95p32.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -68,8 +70,7 @@ typedef struct
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-void M95p32_Reformat(void);
-void M95p32_DebugPrint(uint8_t*, uint32_t size);
+
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
