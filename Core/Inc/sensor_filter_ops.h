@@ -23,7 +23,7 @@ void GetGyroRollingAverage(LSM6DSR_Axes_t, uint32_t);
 
 void MotionAC_Init(void);
 uint8_t CalibrateAccData(LSM6DSR_Object_t *);
-void ApplyAccCalibration(LSM6DSR_Axes_t *);
+void ApplyAccCalibration(LSM6DSR_Axes_t *, float *);
 
 void MotionFX_Init(void);
 void ProcessSensorData(dataframe_t *);

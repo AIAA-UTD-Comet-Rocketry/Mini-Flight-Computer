@@ -41,7 +41,7 @@ void GetAltitude(dataframe_t *nextFrame) {
     // For debugging
     static uint32_t alcounter = 0;
     if (alcounter++ % 1000 == 0) {
-    	char msg[100];
+    	char msg[64];
 		int len = sprintf(msg, "Alt: %.2f ft\n", nextFrame->altitude);
 		_write(0, msg, len);
     }
@@ -98,11 +98,9 @@ void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro, LSM6DSR_Axes_t *currAcc) {
   int bias_updated;
   static uint32_t gccounter = 0;
   uint32_t len;
-  char msg[100] = {};
+  char msg[64];
 
   if(!(gccounter++%1000)){
-    //printf("Gyro before Cal mdps:- X: %d Y: %d Z: %d\n", (int)currGyro->x, (int)currGyro->y, (int)currGyro->z);
-    //printf("Gyro before Cal mdps:- X: Y: Z: \n");
     len = sprintf(msg, "Gyro B mdps:- X: %d Y: %d Z: %d\n", (int)currGyro->x, (int)currGyro->y, (int)currGyro->z);
     _write(0, msg, len);
   }
@@ -123,8 +121,6 @@ void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro, LSM6DSR_Axes_t *currAcc) {
   currGyro->z = currGyro->z - (int32_t)(gc_data_out.GyroBiasZ*1000);
 
   if(!(gccounter%1000)) {
-    //printf("Gyro after Cal mdps:- X: %d Y: %d Z: %d\n\n", (int)currGyro->x, (int)currGyro->y, (int)currGyro->z);
-    //printf("Gyro after Cal mdps:- X: Y: Z:\n\n");
     len = sprintf(msg, "Gyro A mdps:- X: %d Y: %d Z: %d\n", (int)currGyro->x, (int)currGyro->y, (int)currGyro->z);
     _write(0, msg, len);
   }
@@ -166,7 +162,7 @@ void GetGyroRollingAverage(LSM6DSR_Axes_t avgGyro, uint32_t gccounter) {
 	avgGyro.z = (int32_t)(sumZ / count);
 
 	uint32_t len = 0;
-	char msg[100] = {};
+	char msg[64];
 	if(!(gccounter%1000)) {
 		len = sprintf(msg, "Gyro Avg mdps:- X: %d Y: %d Z: %d\n", (int)avgGyro.x, (int)avgGyro.y, (int)avgGyro.z);
 		_write(0, msg, len);
@@ -241,14 +237,13 @@ uint8_t CalibrateAccData(LSM6DSR_Object_t *hlsm6d) {
 
 
 /* Main loop for filtering  */
-void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
+void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc, float *totalAcc) {
 	uint32_t len;
-	char msg[100] = {};
+	char msg[64];
 
 	static uint32_t accounter = 0;
 
 	if(!(accounter++%1000)) {
-		//printf("Acc after Cal:- X: %d Y: %d Z: %d\n", currAcc->x, currAcc->y, currAcc->z);
 		len = sprintf(msg, "Acc B:- X: %d Y: %d Z: %d\n", (int)currAcc->x, (int)currAcc->y, (int)currAcc->z);
 		_write(0, msg, len);
 	}
@@ -258,15 +253,16 @@ void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
 	currAcc->y = (currAcc->y - (int32_t)(ac_data_out.AccBias[1]*1000)) * ac_data_out.SF_Matrix[1][1];
 	currAcc->z = (currAcc->z - (int32_t)(ac_data_out.AccBias[2]*1000)) * ac_data_out.SF_Matrix[2][2];
 
+	float gravity = sqrtf((currAcc->x * currAcc->x) + (currAcc->y * currAcc->y) + (currAcc->z * currAcc->z));
 	if(!(accounter%1000)) {
-		//printf("Acc before Cal:- X: %d Y: %d Z: %d\n\n", currAcc->x, currAcc->y, currAcc->z);
 		len = sprintf(msg, "Acc A:- X: %d Y: %d Z: %d\n", (int)currAcc->x, (int)currAcc->y, (int)currAcc->z);
 		_write(0, msg, len);
 
-		float gravity = sqrt((currAcc->x * currAcc->x) + (currAcc->y * currAcc->y) + (currAcc->z * currAcc->z));
-		len = sprintf(msg, "Gravity: %d mg\n", (int)gravity);
+		len = sprintf(msg, "TotalAcc: %d mg\n", (int)gravity);
 		_write(0, msg, len);
+
 	}
+	*totalAcc = gravity / 1000.0f;
 }
 
 
@@ -302,8 +298,8 @@ void MotionFX_Init(void) {
 	MotionFX_enable_9X(mfx_state, MFX_ENGINE_DISABLE);
 
 	// print library version
-	char msg[100] = {};
-	char version[35] = {};
+	char msg[64];
+	char version[35];
 	MotionFX_GetLibVersion(version);
 	uint32_t len = sprintf(msg, "MotionFX version: %s\n", version);
 	_write(0, msg, len);
@@ -313,7 +309,7 @@ void MotionFX_Init(void) {
 void ProcessSensorData(dataframe_t *nextFrame) {
 	float deltaTime = 1.0f / SAMPLE_FREQ; //0.01f or 10ms
 	uint32_t len = 0;
-	char msg[100] = {};
+	char msg[64];
 	MFX_input_t motion_input;
 	MFX_output_t motion_output;
 

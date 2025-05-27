@@ -71,16 +71,9 @@ extern void temocTests();
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 dataframe_t nextFrame __attribute__((aligned (4))); //aligned for faster data transfer
-dataframe_t stagedMem[14] __attribute__((aligned (4)));
+dataframe_t stagedMem[6] __attribute__((aligned (4)));
 uint8_t memIndex = 0;
 uint8_t sector[4096] __attribute__((aligned (4))) = {0};
-
-typedef struct {
-    int32_t x;
-    int32_t y;
-    int32_t z;
-} GyroSample;
-
 /* USER CODE END 0 */
 
 /**
@@ -91,9 +84,9 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-	memset(&nextFrame,0,sizeof(dataframe_t));
-	memset(&stagedMem,0,sizeof(stagedMem));
-	memIndex = 0;
+  memset(&nextFrame,0,sizeof(dataframe_t));
+  memset(&stagedMem,0,sizeof(stagedMem));
+  memIndex = 0;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -186,17 +179,16 @@ int main(void)
 
 		//apply calibration bias to raw values:
 		ApplyGyroCalibration(&nextFrame.currGyro, &nextFrame.currAcc);
-		ApplyAccCalibration(&nextFrame.currAcc);
+		ApplyAccCalibration(&nextFrame.currAcc, &nextFrame.totalAcc);
 
 		gAltitude = nextFrame.altitude;
-		gTotalAcc = nextFrame.currAcc.y;
+		gTotalAcc = nextFrame.totalAcc;
 		gDegOffVert = nextFrame.pitch;
 
 		ProcessSensorData(&nextFrame);
     }
 
-    //updateState(&fs);
-
+    updateState(&fs);
 
     if(uwTick >= nextTick)
     {
@@ -207,7 +199,7 @@ int main(void)
       memcpy(&stagedMem[memIndex], &nextFrame, sizeof(dataframe_t));
       ++memIndex;
 
-      if(memIndex >= 14) //mem block full
+      if(memIndex >= 6) //mem block full
       {
         memIndex = 0;
         memFlag = 1;

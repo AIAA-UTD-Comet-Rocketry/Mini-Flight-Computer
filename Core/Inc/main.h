@@ -52,6 +52,7 @@ typedef struct
 	float           yaw;           // °
 	float           linAcc[3];     // g (X,Y,Z)
 	float           gravity[3];    // g vector
+	float           totalAcc;      // g scalar
 	float			altitude;      // feet
 } dataframe_t;
 /* USER CODE END ET */
