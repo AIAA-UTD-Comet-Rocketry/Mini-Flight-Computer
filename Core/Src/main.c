@@ -43,6 +43,7 @@
 #define MOTIONAC_CAL_MAGIC	0xACCA1B1E
 #define GBIAS_GYRO_TH_SC    (2.0f*0.002f)
 #define GBIAS_ACC_TH_SC     (2.0f*0.000765f)
+#define GYRO_FILTER_SIZE 	512
 
 #define MOTIONAC_CAL_ADDR  0x000200  // Reserved page after init block
 #define DEBUG_PAGE_ADDR    0x000400
@@ -89,6 +90,12 @@ MFXState_t *mfx_state; // MotionFX engine state
 MFX_input_t motion_input;
 MFX_output_t motion_output;
 
+/* Rolling average gyro filtering */
+static LSM6DSR_Axes_t gyroBuffer[GYRO_FILTER_SIZE];
+static uint32_t gyroIndex = 0;
+static uint8_t gyroBufferFilled = 0;
+static int64_t sumX = 0, sumY = 0, sumZ = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -119,6 +126,7 @@ char MotionAC_SaveCalInNVM(unsigned short int dataSize, unsigned int *data);
 static void MotionFX_Init(void);
 static void GetAltitude(float *);
 static void ProcessSensorData(LSM6DSR_Axes_t, LSM6DSR_Axes_t);
+static void GetGyroRollingAverage(LSM6DSR_Axes_t *);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -144,21 +152,6 @@ uint32_t mem_InitBlock[128] __attribute__((aligned (4))); //512 bytes
 uint8_t memIndex = 0;
 volatile uint8_t debugSector = 0;
 uint8_t sector[4096] __attribute__((aligned (4))) = {0};
-
-#define GYRO_FILTER_SIZE 512
-
-static LSM6DSR_Axes_t gyroBuffer[GYRO_FILTER_SIZE];
-static uint32_t gyroIndex = 0;
-static uint8_t gyroBufferFilled = 0;
-static int64_t sumX = 0, sumY = 0, sumZ = 0;
-
-void GetGyroRollingAverage(LSM6DSR_Axes_t *, uint32_t);
-
-typedef struct {
-    int32_t x;
-    int32_t y;
-    int32_t z;
-} GyroSample;
 
 /* USER CODE END 0 */
 
@@ -226,8 +219,8 @@ int main(void)
   /*Calibrate Accelerometer*/
   calibrated = false;
   nextTick = uwTick;
-
-  if (MotionAC_LoadCalFromNVM(sizeof(cal_data), cal_data) == 0) {
+  if (MotionAC_LoadCalFromNVM(sizeof(cal_data), cal_data) == 0)
+  {
 	memcpy(cal_data, &ac_data_out, sizeof(ac_data_out)); // Serialize
 	MotionAC_GetCalParams(&ac_data_out);
 	calibration_loaded = 1;
@@ -267,13 +260,14 @@ int main(void)
 
 		//apply calibration bias to raw values:
 		ApplyGyroCalibration(&nextFrame.currGyro);
+		GetGyroRollingAverage(&nextFrame.currGyro);
 		ApplyAccCalibration(&nextFrame.currAcc);
 
 		gAltitude = nextFrame.altitude;
 		gTotalAcc = nextFrame.currAcc.y;
 		gDegOffVert = nextFrame.pitch;
 
-		//ProcessSensorData(nextFrame.currGyro, nextFrame.currAcc);
+		ProcessSensorData(nextFrame.currGyro, nextFrame.currAcc);
     }
 
     //updateState(&fs);
@@ -641,7 +635,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 
 /*Calculate Altitude from Pressure and Temperature Data*/
-void GetAltitude(float *altitude) {
+static void GetAltitude(float *altitude)
+{
     const float R = 287.05f;   // Specific gas constant for dry air (J/(kg·K))
     const float g = 9.80665f;  // Gravity (m/s²)
     float T = nextFrame.currTemp;
@@ -669,7 +664,8 @@ void GetAltitude(float *altitude) {
 
 
 /* Initialize the MotionGC library */
-static void MotionGC_Init(void) {
+static void MotionGC_Init(void)
+{
 	float sample_freq = SAMPLE_FREQ;
 	MotionGC_Initialize(mcu_type, &sample_freq); // Initialize with sample frequency
 	MotionGC_GetKnobs(&gc_knobs); // Get default knobs
@@ -683,7 +679,8 @@ static void MotionGC_Init(void) {
 
 
 /* Calibrate gyroscope sensor (LSM6DSR) */
-static int CalibrateGyroData(void) {
+static int CalibrateGyroData(void)
+{
   MGC_input_t data_in;
   LSM6DSR_Axes_t gyro_data;
   LSM6DSR_Axes_t acc_data;
@@ -713,7 +710,8 @@ static int CalibrateGyroData(void) {
 
 
 /* Main loop for filtering  */
-void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro) {
+static void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro)
+{
 	static uint32_t gccounter = 0;
 	uint32_t len;
 	char msg[100] = {};
@@ -738,11 +736,16 @@ void ApplyGyroCalibration(LSM6DSR_Axes_t *currGyro) {
 		len = sprintf(msg, "Gyro A mdps:- X: %d Y: %d Z: %d\n", (int)currGyro->x, (int)currGyro->y, (int)currGyro->z);
 		_write(0, msg, len);
 	}
-	GetGyroRollingAverage(currGyro, gccounter);
 }
 
 
-void GetGyroRollingAverage(LSM6DSR_Axes_t *avgGyro, uint32_t gccounter) {
+static void GetGyroRollingAverage(LSM6DSR_Axes_t *avgGyro)
+{
+	uint32_t count = 0;
+	uint32_t len = 0;
+	uint32_t gccounter = 0;
+	char msg[100] = {};
+
 	// Remove oldest value from sum
 	sumX -= gyroBuffer[gyroIndex].x;
 	sumY -= gyroBuffer[gyroIndex].y;
@@ -760,19 +763,23 @@ void GetGyroRollingAverage(LSM6DSR_Axes_t *avgGyro, uint32_t gccounter) {
 
 	// Advance buffer index
 	gyroIndex = (gyroIndex + 1) % GYRO_FILTER_SIZE;
+
 	if (gyroIndex == 0) {
 	    gyroBufferFilled = 1;
 	}
 
+	if (gyroBufferFilled) { //Buffer is full
+		count = GYRO_FILTER_SIZE;
+	} else {
+		count = gyroIndex;
+	}
+
 	// Compute average
-	uint32_t count = gyroBufferFilled ? GYRO_FILTER_SIZE : gyroIndex;
 	avgGyro->x = (int32_t)(sumX / count);
 	avgGyro->y = (int32_t)(sumY / count);
 	avgGyro->z = (int32_t)(sumZ / count);
 
-	uint32_t len = 0;
-	char msg[100] = {};
-	if(!(gccounter%1000)) {
+	if(!(++gccounter % 1000)) {
 		len = sprintf(msg, "Gyro Avg mdps:- X: %d Y: %d Z: %d\n", (int)avgGyro->x, (int)avgGyro->y, (int)avgGyro->z);
 		_write(0, msg, len);
 	}
@@ -780,7 +787,8 @@ void GetGyroRollingAverage(LSM6DSR_Axes_t *avgGyro, uint32_t gccounter) {
 
 
 /* Initialize the MotionAC library */
-static void MotionAC_Init(void) {
+static void MotionAC_Init(void)
+{
 	MotionAC_Initialize(true); // Initialize with sample frequency
 	MotionAC_GetKnobs(&ac_knobs);
 
@@ -795,7 +803,8 @@ static void MotionAC_Init(void) {
 
 
 /* Calibrate accelerometer sensor (LSM6DSR)*/
-static uint8_t CalibrateAccData(void) {
+static uint8_t CalibrateAccData(void)
+{
   MAC_input_t data_in;
   LSM6DSR_Axes_t acc_data;
   LSM6DSR_ACC_GetAxes(&hlsm6d, &acc_data);
@@ -846,7 +855,8 @@ static uint8_t CalibrateAccData(void) {
 
 
 /* Main loop for filtering  */
-void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
+static void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc)
+{
 	MAC_output_t data_out;
 	uint32_t len;
 	char msg[100] = {};
@@ -878,7 +888,8 @@ void ApplyAccCalibration(LSM6DSR_Axes_t *currAcc) {
 	}
 }
 
-static void MotionFX_Init(void) {
+static void MotionFX_Init(void)
+{
 	MFX_knobs_t knobs;
 
 	// Allocate memory for MotionFX state
@@ -920,7 +931,8 @@ static void MotionFX_Init(void) {
 	_write(0, msg, len);
 }
 
-void ProcessSensorData(LSM6DSR_Axes_t currGyro, LSM6DSR_Axes_t currAcc) {
+static void ProcessSensorData(LSM6DSR_Axes_t currGyro, LSM6DSR_Axes_t currAcc)
+{
 	float deltaTime = 1.0f / SAMPLE_FREQ; //0.01f or 10ms
 	uint32_t len = 0;
 	char msg[100] = {};
@@ -952,7 +964,8 @@ void ProcessSensorData(LSM6DSR_Axes_t currGyro, LSM6DSR_Axes_t currAcc) {
 
 	static uint32_t fxcounter = 0;
 
-	if((++fxcounter % 1000 == 0)) {
+	if((++fxcounter % 1000 == 0))
+	{
 		len = sprintf(msg, "Roll: %d deg\n", (int)nextFrame.roll);
 		_write(0, msg, len);
 		len = sprintf(msg, "Pitch: %d deg\n", (int)nextFrame.pitch);
