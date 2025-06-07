@@ -31,12 +31,30 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdlib.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include "lps22hh.h"
+#include "lsm6dsr.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-
+typedef struct
+{
+	float 			currPress; 	   // hPa
+	float			currTemp; 	   // °C
+	LSM6DSR_Axes_t	currAcc; 	   // mg
+	LSM6DSR_Axes_t	currGyro; 	   // mdps
+	uint32_t        currTick;      // ms
+	float           roll;          // °
+	float           pitch;         // °
+	float           yaw;           // °
+	float           linAcc[3];     // g (X,Y,Z)
+	float           gravity[3];    // g vector
+	float           totalAcc;      // g scalar
+	float			altitude;      // feet
+} dataframe_t;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/

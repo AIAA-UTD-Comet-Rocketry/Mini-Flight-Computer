@@ -22,6 +22,7 @@
  */
 
 #include "FlightState.h"
+#include "math.h"
 
 
 /* Extern data streams to include */
@@ -37,6 +38,9 @@ extern void M95p32_DebugPrint(const uint8_t*, uint32_t size);
 
 /* Private Variables */
 float prevAlt = 0;
+float prevVel = 0;
+uint8_t apogeeConfirmed = 0;
+uint8_t landedSamples = 0;
 uint32_t transDelay = UINT32_MAX;
 
 
@@ -48,6 +52,10 @@ uint32_t transDelay = UINT32_MAX;
 #define APOGEE_SAMPLE_PERIOD_MS 500     // Descent detection altitude sample compare period
 #define MAIN_DEPLOY_ALTITUDE    1000.0  // End of drogue descent (ft)
 #define LANDED_SAMPLE_PERIOD_MS 10000   // Landed detection altitude sample compare period
+#define LANDED_ALT_THRESHOLD	1.0		// 1ft change in altitude to be considered landed
+#define LANDED_SAMPLES_REQ		1		// 1 consecutive stable samples
+#define APOGEE_COOLDOWN_MS      100     // 0.1s stable descent required
+#define LANDED_COOLDOWN_MS		10000	// 10 sec
 
 
 /* Redefined Callback Implementations, Called when new state is entered */
@@ -132,12 +140,36 @@ bool risingExitTransition(void)
 }
 
 //todo ejection attempt should be attempted multiple times but briefly enough to avoid brownout.
-bool apogeeExitTransition(void) { return true; }
+bool apogeeExitTransition(void)
+{
+	float currentVel = (gAltitude - prevAlt) / (APOGEE_SAMPLE_PERIOD_MS * 0.001f); // ft / s
+
+	// Apogee detection logic
+	if (uwTick >= transDelay) {
+		if (currentVel <= 0 && !apogeeConfirmed)
+		{
+			// Negative velocity + cooldown period
+			transDelay = uwTick + APOGEE_COOLDOWN_MS;
+			apogeeConfirmed = 1;
+		}
+		else if (apogeeConfirmed && uwTick > transDelay)
+		{
+			//todo drogue charge is fired here
+			prevAlt = gAltitude; // reset for descent tracking
+			return true;
+		}
+
+		prevAlt = gAltitude;
+		transDelay = uwTick + APOGEE_SAMPLE_PERIOD_MS;
+	}
+	return false;
+}
 
 bool drogueDescentExitTransition(void)
 {
   if(gAltitude < MAIN_DEPLOY_ALTITUDE)
   {
+	  //todo main charge is fired here
     transDelay = uwTick;
     return true; // no longer rising
   }
@@ -146,13 +178,24 @@ bool drogueDescentExitTransition(void)
 
 bool mainDescentExitTransition(void)
 {
+	// Calculate altitude stability
+	float deltaAlt = fabs(gAltitude - prevAlt);
+
   // Look for apogee
   if(uwTick >= transDelay)
   {
-    if(gAltitude >= prevAlt) //todo updrafts may trigger
+    if (deltaAlt < LANDED_ALT_THRESHOLD)
+	{
+    	landedSamples++;
+
+    	if (landedSamples > LANDED_SAMPLES_REQ)
+    	{
+    		return true;
+    	}
+	}
+    else
     {
-      transDelay = uwTick;
-      return true; // no longer falling
+    	landedSamples = 0; // Reset counter
     }
 
     // still falling, set-up next altitude comparison
@@ -162,4 +205,27 @@ bool mainDescentExitTransition(void)
   return false;
 }
 
-bool landedExitTransition(void) { return false; } // not re-launch prior to reboot
+bool landedExitTransition(void) // not re-launch prior to reboot
+{
+	uint32_t landedTime = 0; // Additional landing verification
+
+	// Check for low acceleration
+	if (fabs(gTotalAcc - 1.0f) < 0.2f && fabs(gDegOffVert) < 5.0f)
+	{
+		if (landedTime == 0)
+		{
+			landedTime = uwTick;
+		}
+		// Stay in landed state for min 10 sec
+		if ((uwTick - landedTime) > LANDED_COOLDOWN_MS)
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+	landedTime = 0;
+	return false;
+}
